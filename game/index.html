@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%23ff4fa3'/%3E%3Ctext x='8' y='12' font-size='10' text-anchor='middle' fill='white' font-family='Arial'%3ETC%3C/text%3E%3C/svg%3E">
+<title>Teluk Cerah — Open-World Crime 3D</title>
+<style>
+  :root {
+    --panel: rgba(8, 12, 20, 0.72);
+    --panel-soft: rgba(8, 12, 20, 0.55);
+    --line: rgba(120, 200, 255, 0.28);
+    --gold: #ffd75e;
+    --green: #7dff8a;
+    --red: #ff5a5a;
+    --cyan: #5fd7ff;
+    --text: #eef2f8;
+    --dim: #aab4c4;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #070a13; }
+  body { font-family: "Segoe UI", Arial, Helvetica, sans-serif; color: var(--text); }
+  #game-container { position: fixed; inset: 0; z-index: 0; }
+  #game-canvas { display: block; }
+
+  #hud { position: fixed; inset: 0; z-index: 5; pointer-events: none; font-size: 14px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+  .gold { color: var(--gold); } .green { color: var(--green); } .red { color: var(--red); }
+  .cyan { color: var(--cyan); } .dim { color: var(--dim); }
+
+  /* Kiri atas: uang, health, armor, senjata */
+  #stats-box { position: absolute; top: 12px; left: 12px; min-width: 210px; }
+  #cash-value { color: var(--green); font-size: 22px; font-weight: 800; letter-spacing: 0.5px; }
+  .bar-row { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 12px; }
+  .bar-label { width: 46px; color: var(--dim); font-weight: 700; }
+  .bar-track { flex: 1; height: 9px; background: rgba(255,255,255,0.14); border-radius: 5px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 5px; }
+  #hp-bar { background: linear-gradient(90deg, #ff5a5a, #ff8a5a); width: 100%; }
+  #armor-bar { background: linear-gradient(90deg, #5a8cff, #5fd7ff); width: 0%; }
+  #hp-text { width: 30px; text-align: right; font-weight: 700; }
+  #weapon-list { margin-top: 6px; font-size: 12.5px; line-height: 1.5; }
+  #weapon-list .active { color: var(--gold); font-weight: 700; }
+
+  /* Tengah atas: strip fitur + banner */
+  #feature-strip { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); font-size: 11.5px; letter-spacing: 1px; color: var(--green); text-shadow: 0 1px 3px #000; white-space: nowrap; }
+  #banner { position: absolute; top: 34px; left: 50%; transform: translateX(-50%); background: rgba(160, 20, 20, 0.85); border: 1px solid rgba(255, 120, 120, 0.6); color: #fff; font-weight: 800; letter-spacing: 1px; padding: 5px 16px; border-radius: 6px; font-size: 14px; display: none; }
+
+  /* Kanan atas: wanted, jam, radio */
+  #right-box { position: absolute; top: 12px; right: 12px; text-align: right; min-width: 230px; }
+  #wanted-stars { font-size: 20px; color: var(--gold); letter-spacing: 3px; text-shadow: 0 0 8px rgba(255, 215, 94, 0.6); }
+  #wanted-label { font-size: 12px; color: var(--red); font-weight: 700; }
+  #clock-readout { margin-top: 4px; font-size: 13px; }
+  #radio-readout { margin-top: 2px; font-size: 13px; color: var(--green); }
+
+  /* Kiri tengah: kotak misi + kotak polisi */
+  #mission-box { position: absolute; top: 132px; left: 12px; width: 250px; border-color: rgba(255, 215, 94, 0.55); }
+  #mission-box .m-title { color: var(--gold); font-weight: 800; font-size: 13.5px; }
+  #mission-box .m-next { margin-top: 4px; font-size: 13px; line-height: 1.45; }
+  #mission-box .m-reward { margin-top: 4px; color: var(--green); font-size: 12.5px; }
+  #police-box { position: absolute; top: 262px; left: 12px; width: 250px; }
+  #police-box .p-title { color: var(--cyan); font-weight: 800; font-size: 13px; letter-spacing: 0.5px; }
+  #police-box .p-row { display: flex; justify-content: space-between; font-size: 12.5px; margin-top: 3px; }
+  #police-box .p-row .u-name { color: var(--gold); font-weight: 700; }
+  #police-box .p-row .u-status { color: var(--green); }
+
+  /* Kiri bawah: minimap */
+  #minimap-wrap { position: absolute; left: 14px; bottom: 14px; text-align: center; }
+  #minimap { width: 148px; height: 148px; border-radius: 50%; border: 2px solid rgba(200, 220, 255, 0.55); background: rgba(6, 10, 18, 0.8); box-shadow: 0 0 18px rgba(0,0,0,0.6); }
+  #minimap-label { margin-top: 4px; font-size: 12px; color: var(--dim); }
+
+  /* Tengah bawah: objektif + dialog */
+  #objective-line { position: absolute; left: 50%; bottom: 128px; transform: translateX(-50%); background: var(--panel-soft); border-radius: 6px; padding: 6px 14px; font-size: 13.5px; white-space: nowrap; }
+  #dialog-box { position: absolute; left: 50%; bottom: 26px; transform: translateX(-50%); width: 460px; display: none; align-items: flex-start; gap: 10px; }
+  #dialog-box .portrait { flex: 0 0 44px; width: 44px; height: 44px; border-radius: 50%; background: #22c55e; color: #fff; font-weight: 800; font-size: 22px; display: flex; align-items: center; justify-content: center; border: 2px solid rgba(255,255,255,0.7); }
+  #dialog-box .d-name { color: var(--gold); font-weight: 800; font-size: 13.5px; }
+  #dialog-box .d-text { font-size: 13.5px; line-height: 1.45; margin-top: 2px; }
+
+  /* Kanan bawah: NOS, kondisi, kecepatan */
+  #drive-box { position: absolute; right: 14px; bottom: 14px; text-align: right; width: 210px; }
+  #nos-bar { height: 8px; background: rgba(255,255,255,0.14); border-radius: 4px; overflow: hidden; margin-bottom: 5px; }
+  #nos-bar .fill { height: 100%; width: 100%; background: linear-gradient(90deg, #37e6ff, #7dff8a); }
+  #nos-label { font-size: 11.5px; color: var(--cyan); font-weight: 700; }
+  #condition-readout { font-size: 12.5px; color: var(--green); margin-top: 2px; }
+  #speed-readout { font-size: 34px; font-weight: 800; line-height: 1; }
+  #speed-readout small { font-size: 14px; color: var(--dim); font-weight: 600; }
+
+  /* Crosshair tengah */
+  #crosshair { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font-size: 26px; color: rgba(255,255,255,0.9); text-shadow: 0 0 4px #000; display: none; }
+
+  /* Vignette sinematik + kilat damage */
+  #vignette { position: fixed; inset: 0; z-index: 4; pointer-events: none; background: radial-gradient(ellipse at center, transparent 58%, rgba(0,0,0,0.42) 100%); }
+  #damage-flash { position: fixed; inset: 0; z-index: 6; pointer-events: none; background: radial-gradient(ellipse at center, transparent 55%, rgba(200,0,0,0.45) 100%); opacity: 0; }
+
+  /* Overlay layar penuh */
+  .overlay { position: fixed; inset: 0; z-index: 20; display: none; align-items: center; justify-content: center; pointer-events: auto; }
+  .overlay.open { display: flex; }
+
+  /* Layar judul */
+  #title-overlay { background: linear-gradient(180deg, rgba(5,8,16,0.25) 0%, rgba(5,8,16,0.55) 55%, rgba(5,8,16,0.88) 100%); flex-direction: column; text-align: center; padding: 20px; }
+  #title-overlay h1 { font-size: 84px; font-weight: 900; letter-spacing: 4px; line-height: 0.95; background: linear-gradient(90deg, #ff9a3c, #ff4fa3 48%, #5a8cff); -webkit-background-clip: text; background-clip: text; color: transparent; text-shadow: 0 4px 30px rgba(255, 79, 163, 0.25); }
+  #title-overlay .subtitle { margin-top: 8px; font-size: 15px; letter-spacing: 2px; color: var(--text); max-width: 720px; }
+  #title-overlay .tagline { margin-top: 8px; font-size: 15px; color: var(--gold); font-style: italic; }
+  #cast { display: flex; gap: 26px; margin-top: 26px; }
+  #cast .char { width: 92px; }
+  #cast .face { width: 64px; height: 64px; margin: 0 auto; border-radius: 50%; border: 3px solid rgba(255,255,255,0.85); display: flex; align-items: center; justify-content: center; font-size: 28px; font-weight: 800; color: #fff; }
+  #cast .c-name { margin-top: 6px; font-weight: 800; font-size: 14px; }
+  #cast .c-role { font-size: 12px; color: var(--dim); }
+  #continue-box { margin-top: 24px; border: 1px solid rgba(125, 255, 138, 0.7); background: rgba(10, 30, 16, 0.6); color: var(--green); padding: 10px 22px; border-radius: 6px; font-size: 15px; max-width: 640px; }
+  #title-menu { margin-top: 18px; font-size: 17px; line-height: 1.9; color: var(--green); font-weight: 700; }
+  #howto { position: absolute; right: 26px; top: 50%; transform: translateY(-50%); text-align: left; width: 250px; }
+  #howto h3 { color: var(--cyan); letter-spacing: 2px; font-size: 15px; margin-bottom: 8px; }
+  #howto .row { display: flex; gap: 10px; font-size: 13.5px; padding: 3px 0; }
+  #howto .row b { width: 62px; color: var(--gold); }
+  #title-foot { position: absolute; bottom: 16px; left: 0; right: 0; text-align: center; font-size: 13px; color: var(--dim); line-height: 1.6; }
+
+  /* Peta layar penuh */
+  #map-overlay { background: rgba(4, 7, 13, 0.94); }
+  #map-inner { display: flex; gap: 26px; width: 1180px; max-width: 96vw; }
+  #map-left { flex: 1; }
+  #map-overlay h2 { color: var(--gold); font-size: 34px; letter-spacing: 2px; }
+  #map-hint { color: var(--dim); font-size: 13px; margin: 4px 0 10px; }
+  #map-canvas { width: 100%; height: 560px; background: #0a1220; border: 2px solid rgba(120, 200, 255, 0.5); border-radius: 4px; }
+  #map-right { width: 380px; }
+  #map-right h3 { color: var(--gold); font-size: 17px; letter-spacing: 1px; margin: 12px 0 6px; }
+  #map-right h3:first-child { margin-top: 0; }
+  #map-missions, #map-stats, #map-legend { font-size: 13.5px; line-height: 1.75; }
+  #map-missions .done { color: var(--green); }
+  #map-missions .active { color: var(--gold); }
+  #map-missions .locked { color: var(--dim); }
+  #map-legend { columns: 2; }
+  #map-feature { margin-top: 14px; color: var(--green); font-size: 12px; letter-spacing: 0.5px; line-height: 1.6; }
+
+  /* Pause */
+  #pause-overlay { background: rgba(4, 7, 13, 0.8); flex-direction: column; text-align: center; }
+  #pause-overlay h2 { font-size: 44px; letter-spacing: 6px; color: var(--gold); }
+  #pause-menu { margin-top: 20px; font-size: 18px; line-height: 2.1; color: var(--text); }
+  #pause-menu b { color: var(--gold); }
+  #save-slots { margin-top: 14px; font-size: 13.5px; color: var(--dim); line-height: 1.8; }
+</style>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.min.js" } }
+</script>
+</head>
+<body>
+<div id="game-container"></div>
+<div id="vignette"></div>
+<div id="damage-flash"></div>
+
+<div id="hud">
+  <div id="feature-strip">10 STORY MISSIONS &middot; HELICOPTER CHASES &middot; POLICE RESPONSE &middot; RADIO 3 STATIONS &middot; GARAGE UPGRADES &middot; 3 SAVE SLOTS &middot; 24 SHELLS</div>
+  <div id="banner"></div>
+
+  <div id="stats-box" class="panel">
+    <div id="cash-value">$0</div>
+    <div class="bar-row"><span class="bar-label">HP</span><div class="bar-track"><div id="hp-bar" class="bar-fill"></div></div><span id="hp-text">100</span></div>
+    <div class="bar-row"><span class="bar-label">ARMOR</span><div class="bar-track"><div id="armor-bar" class="bar-fill"></div></div><span id="armor-text">0</span></div>
+    <div id="weapon-list">1 Tinju &middot; 2 Pistol 12/12 &middot; 3 SG 0/0</div>
+  </div>
+
+  <div id="right-box">
+    <div id="wanted-stars">&#9734;&#9734;&#9734;&#9734;&#9734;</div>
+    <div id="wanted-label">WANTED 0/5</div>
+    <div id="clock-readout">Min 21:00 &middot; Hari 1</div>
+    <div id="radio-readout">&#9834; Pantai FM &mdash; &ldquo;Senja di Teluk&rdquo;</div>
+  </div>
+
+  <div id="mission-box" class="panel">
+    <div class="m-title">M1 &mdash; Pulang Kampung</div>
+    <div class="m-next">NEXT: Jalan ke mobil pinjaman</div>
+    <div class="m-reward">Hadiah $150</div>
+  </div>
+
+  <div id="police-box" class="panel">
+    <div class="p-title">POLISI TELUK CERAH &mdash; KODE 0</div>
+    <div class="p-row"><span class="dim">Tidak ada pengejaran.</span></div>
+  </div>
+
+  <div id="minimap-wrap">
+    <canvas id="minimap" width="180" height="180"></canvas>
+    <div id="minimap-label">Perumahan</div>
+  </div>
+
+  <div id="objective-line">Jalan ke mobil pinjaman</div>
+
+  <div id="dialog-box" class="panel">
+    <div class="portrait">B</div>
+    <div><div class="d-name">Bu Sari</div><div class="d-text"></div></div>
+  </div>
+
+  <div id="drive-box">
+    <div id="nos-label">NOS</div>
+    <div id="nos-bar"><div class="fill"></div></div>
+    <div id="condition-readout">KONDISI 100%</div>
+    <div id="speed-readout">0 <small>KM/J</small></div>
+  </div>
+
+  <div id="crosshair">+</div>
+</div>
+
+<div id="title-overlay" class="overlay open">
+  <h1>TELUK CERAH</h1>
+  <div class="subtitle">OPEN-WORLD CRIME 3D &middot; 10 MISI &middot; HELIKOPTER &middot; RADIO &middot; GARAGE</div>
+  <div class="tagline">Tiga tahun merantau, Raka pulang ke Teluk Cerah.</div>
+  <div id="cast">
+    <div class="char"><div class="face" style="background:#3b82f6">R</div><div class="c-name">Raka</div><div class="c-role">Protagonis</div></div>
+    <div class="char"><div class="face" style="background:#f59e0b">B</div><div class="c-name">Bu Sari</div><div class="c-role">Fixer</div></div>
+    <div class="char"><div class="face" style="background:#22c55e">D</div><div class="c-name">Dimas</div><div class="c-role">Mekanik</div></div>
+    <div class="char"><div class="face" style="background:#a855f7">N</div><div class="c-name">Nadia</div><div class="c-role">Pembalap</div></div>
+    <div class="char"><div class="face" style="background:#92400e">S</div><div class="c-name">Sinta</div><div class="c-role">Peretas</div></div>
+    <div class="char"><div class="face" style="background:#ef4444">B</div><div class="c-name">Bimo</div><div class="c-role">Penjaga</div></div>
+  </div>
+  <div id="continue-box">LANJUTKAN &mdash; Misi 7/10 &middot; $14,830 &middot; Hari 3 &middot; REP 3 Pembalap Teluk &middot; Kerang 7/24</div>
+  <div id="title-menu">ENTER &mdash; New Game<br>L &mdash; Lanjutkan save</div>
+  <div id="howto" class="panel">
+    <h3>HOW TO PLAY</h3>
+    <div class="row"><b>WASD</b><span>Walk / drive</span></div>
+    <div class="row"><b>Mouse</b><span>Aim &middot; Click to shoot</span></div>
+    <div class="row"><b>Shift</b><span>Sprint / NOS</span></div>
+    <div class="row"><b>F</b><span>Enter / steal vehicle</span></div>
+    <div class="row"><b>E</b><span>Interact &middot; next</span></div>
+    <div class="row"><b>R</b><span>Reload &middot; radio (di mobil)</span></div>
+    <div class="row"><b>M</b><span>City map</span></div>
+    <div class="row"><b>Esc</b><span>Pause</span></div>
+  </div>
+  <div id="title-foot">WASD gerak &middot; E masuk mobil &middot; F curi &middot; Klik tembak &middot; R reload / radio &middot; Shift NOS &middot; M peta &middot; N mute<br>Semua nama, kota, dan cerita orisinal. Bukan GTA.</div>
+</div>
+
+<div id="map-overlay" class="overlay">
+  <div id="map-inner">
+    <div id="map-left">
+      <h2>PETA TELUK CERAH</h2>
+      <div id="map-hint">M / Esc &mdash; tutup peta</div>
+      <canvas id="map-canvas" width="760" height="560"></canvas>
+    </div>
+    <div id="map-right">
+      <h3>MISI CERITA</h3>
+      <div id="map-missions"></div>
+      <h3>STATISTIK</h3>
+      <div id="map-stats"></div>
+      <h3>LEGENDA</h3>
+      <div id="map-legend"></div>
+      <div id="map-feature">10 STORY MISSIONS &middot; HELICOPTER CHASES &middot; POLICE RESPONSE &middot; RADIO 3 STATIONS &middot; GARAGE UPGRADES &middot; 3 SAVE SLOTS &middot; 24 SHELLS</div>
+    </div>
+  </div>
+</div>
+
+<div id="pause-overlay" class="overlay">
+  <h2>PAUSE</h2>
+  <div id="pause-menu"><b>Esc</b> &mdash; Lanjutkan &middot; <b>S</b> &mdash; Save &middot; <b>M</b> &mdash; Peta &middot; <b>Q</b> &mdash; Kembali ke Title</div>
+  <div id="save-slots"></div>
+</div>
+
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
