@@ -1,8 +1,8 @@
 # Teluk Cerah — a 3D open-world action game
 
 [![make.fun · gta6-01](https://make.fun/badge/gta6-01.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
-[![rank](https://make.fun/badge/gta6-01/burnokew-oss/gta6-01-v3/rank.svg)](https://make.fun/bounty/gta6-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
-[![reward](https://make.fun/badge/gta6-01/burnokew-oss/gta6-01-v3/reward.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+[![rank](https://make.fun/badge/gta6-01/burnokew-oss/gta6-01-v3-clean/rank.svg)](https://make.fun/bounty/gta6-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+[![reward](https://make.fun/badge/gta6-01/burnokew-oss/gta6-01-v3-clean/reward.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 
 **Teluk Cerah** is a 3D open-world action game built for [make.fun](https://make.fun/bounty/gta6-01)'s "Make GTA 6" bounty ($1,666 in USDC). Drive through a neon night city, outrun the police under a helicopter spotlight, take on story missions, tune your car, and climb the wanted ladder — all in the browser, no install, no network needed while playing.
 
