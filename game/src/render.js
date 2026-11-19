@@ -1,367 +1,366 @@
-// Teluk Cerah — pembuatan dunia tiga dimensi.
-// Menyiapkan scene, kamera, renderer, dan lampu; menggambar satu frame;
-// menyesuaikan ukuran saat jendela berubah.
+import 'three';
+const THREE = window.THREE;
+import { ensureCityMeshes } from './city.js';
 
-import * as ThreeModule from 'three';
-import { CONFIG } from './config.js';
+const GOLD_TOP = '#2e3a7a';
+const GOLD_MID = '#e0705c';
+const GOLD_LOW = '#ff8a3a';
+const DUSK_TOP = '#232a55';
+const DUSK_MID = '#b06a8e';
+const DUSK_LOW = '#ff9e66';
 
-const THREE = (ThreeModule && ThreeModule.Scene)
-  ? ThreeModule
-  : globalThis.THREE;
-if (!THREE || !THREE.Scene) {
-  throw new Error('three.js belum termuat: periksa game/vendor/three.min.js');
+function skyTexture(top, mid, low) {
+  const c = document.createElement('canvas');
+  c.width = 16;
+  c.height = 512;
+  const g = c.getContext('2d');
+  const grad = g.createLinearGradient(0, 0, 0, 512);
+  grad.addColorStop(0, top);
+  grad.addColorStop(0.45, mid);
+  grad.addColorStop(0.72, low);
+  grad.addColorStop(1, '#ffb36b');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 16, 512);
+  return new THREE.CanvasTexture(c);
 }
 
-const NIGHT = {
-  sky: new THREE.Color(CONFIG.colors.skyNight),
-  fog: new THREE.Color(CONFIG.colors.fogNight),
-  hemiSky: new THREE.Color(0x2a3a5f),
-  hemiGround: new THREE.Color(0x0a0c12),
-  hemiIntensity: 0.58,
-  moonColor: new THREE.Color(0x8fb0ff),
-  moonIntensity: 0.5,
-};
+function makeRain() {
+  const count = 460;
+  const pos = new Float32Array(count * 6);
+  for (let i = 0; i < count; i++) {
+    const x = (Math.random() - 0.5) * 90;
+    const y = Math.random() * 34;
+    const z = (Math.random() - 0.5) * 90;
+    pos[i * 6] = x;
+    pos[i * 6 + 1] = y;
+    pos[i * 6 + 2] = z;
+    pos[i * 6 + 3] = x + 0.4;
+    pos[i * 6 + 4] = y - 1.8;
+    pos[i * 6 + 5] = z;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  const mat = new THREE.LineBasicMaterial({ color: 0xd8e8ff, transparent: true, opacity: 0.55 });
+  const lines = new THREE.LineSegments(geo, mat);
+  lines.frustumCulled = false;
+  return lines;
+}
 
-const DAY = {
-  sky: new THREE.Color(CONFIG.colors.skyDay),
-  fog: new THREE.Color(CONFIG.colors.fogDay),
-  hemiSky: new THREE.Color(0xbfd9ff),
-  hemiGround: new THREE.Color(0x5a5a48),
-  hemiIntensity: 1.0,
-  moonColor: new THREE.Color(0xfff2d0),
-  moonIntensity: 1.1,
-};
+function makeSplashes(scene) {
+  const group = new THREE.Group();
+  const items = [];
+  const geo = new THREE.RingGeometry(0.12, 0.2, 20);
+  for (let i = 0; i < 46; i++) {
+    const m = new THREE.MeshBasicMaterial({ color: 0xdfeeff, transparent: true, opacity: 0.4, side: THREE.DoubleSide });
+    const ring = new THREE.Mesh(geo, m);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set((Math.random() - 0.5) * 160, 0.06, 96 + (Math.random() - 0.5) * 26);
+    ring.userData.phase = Math.random();
+    group.add(ring);
+    items.push(ring);
+  }
+  scene.add(group);
+  return items;
+}
 
-function mixColor(target, a, b, t) {
-  target.copy(a).lerp(b, t);
+function makeClouds(scene, tex) {
+  const group = new THREE.Group();
+  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.55, depthWrite: false });
+  for (let i = 0; i < 9; i++) {
+    const w = 90 + Math.random() * 130;
+    const h = 16 + Math.random() * 14;
+    const plane = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
+    plane.position.set(-500 + Math.random() * 1000, 150 + Math.random() * 70, -260 + Math.random() * 420);
+    plane.userData.speed = 0.6 + Math.random() * 1.1;
+    group.add(plane);
+  }
+  scene.add(group);
+  return group;
+}
+
+function cloudTexture() {
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 64;
+  const g = c.getContext('2d');
+  g.clearRect(0, 0, 256, 64);
+  for (let i = 0; i < 14; i++) {
+    const x = 20 + Math.random() * 216;
+    const y = 22 + Math.random() * 22;
+    const r = 12 + Math.random() * 20;
+    const grad = g.createRadialGradient(x, y, 2, x, y, r);
+    grad.addColorStop(0, 'rgba(255,235,220,0.85)');
+    grad.addColorStop(1, 'rgba(255,235,220,0)');
+    g.fillStyle = grad;
+    g.beginPath();
+    g.arc(x, y, r, 0, Math.PI * 2);
+    g.fill();
+  }
+  return new THREE.CanvasTexture(c);
+}
+
+function makeBirds(scene) {
+  const group = new THREE.Group();
+  const mat = new THREE.MeshBasicMaterial({ color: 0x2a2438 });
+  for (let i = 0; i < 6; i++) {
+    const bird = new THREE.Group();
+    const w1 = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.08, 0.3), mat);
+    w1.rotation.z = 0.5;
+    const w2 = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.08, 0.3), mat);
+    w2.rotation.z = -0.5;
+    bird.add(w1);
+    bird.add(w2);
+    bird.position.set(-260 + i * 90, 95 + Math.random() * 45, -120 + Math.random() * 220);
+    bird.userData.speed = 5 + Math.random() * 4;
+    bird.userData.phase = Math.random() * 6;
+    group.add(bird);
+  }
+  scene.add(group);
+  return group;
 }
 
 export function createWorld() {
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(CONFIG.colors.skyNight);
-  scene.fog = new THREE.FogExp2(CONFIG.colors.fogNight, 0.0032);
-
-  const camera = new THREE.PerspectiveCamera(
-    CONFIG.camera.fov,
-    window.innerWidth / Math.max(1, window.innerHeight),
-    CONFIG.camera.near,
-    CONFIG.camera.far,
-  );
-  camera.position.set(188, 4, -140);
-
-  const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+  const canvas = document.getElementById('game-canvas');
+  const renderer = new THREE.WebGLRenderer({ canvas: canvas || undefined, antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  if ('SRGBColorSpace' in THREE) renderer.outputColorSpace = THREE.SRGBColorSpace;
-  if ('ACESFilmicToneMapping' in THREE) {
+  if ('toneMapping' in renderer && THREE.ACESFilmicToneMapping !== undefined) {
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.15;
+    renderer.toneMappingExposure = 0.95;
   }
-  const host = document.getElementById('game-container') || document.body;
-  const canvas = renderer.domElement;
-  canvas.id = 'game-canvas';
-  canvas.style.position = 'fixed';
-  canvas.style.inset = '0';
-  canvas.style.zIndex = '0';
-  host.appendChild(canvas);
+  if (!canvas) {
+    const holder = document.getElementById('game-container') || document.body;
+    holder.appendChild(renderer.domElement);
+  }
+  const scene = new THREE.Scene();
+  scene.fog = new THREE.Fog(0xdd8855, 160, 700);
+  const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 2200);
+  camera.position.set(60, 6, 120);
 
-  // Lampu: langit malam yang redup + bulan sebagai sumber bayangan.
-  const hemi = new THREE.HemisphereLight(NIGHT.hemiSky, NIGHT.hemiGround, NIGHT.hemiIntensity);
+  const hemi = new THREE.HemisphereLight(0xffd9b0, 0x4a3a30, 0.55);
   scene.add(hemi);
+  const sun = new THREE.DirectionalLight(0xffb36b, 1.2);
+  sun.position.set(-160, 70, 90);
+  scene.add(sun);
+  const amb = new THREE.AmbientLight(0xffe2c4, 0.25);
+  scene.add(amb);
+  const fill = new THREE.DirectionalLight(0x9fb4ff, 0.7);
+  fill.position.set(120, 80, -140);
+  scene.add(fill);
 
-  const moon = new THREE.DirectionalLight(NIGHT.moonColor, NIGHT.moonIntensity);
-  moon.position.set(120, 220, -80);
-  moon.castShadow = true;
-  moon.shadow.mapSize.set(2048, 2048);
-  moon.shadow.camera.left = -130;
-  moon.shadow.camera.right = 130;
-  moon.shadow.camera.top = 130;
-  moon.shadow.camera.bottom = -130;
-  moon.shadow.camera.near = 20;
-  moon.shadow.camera.far = 600;
-  moon.shadow.bias = -0.0004;
-  scene.add(moon);
-  scene.add(moon.target);
+  const goldenTex = skyTexture(GOLD_TOP, GOLD_MID, GOLD_LOW);
+  const duskTex = skyTexture(DUSK_TOP, DUSK_MID, DUSK_LOW);
+  const domeGeo = new THREE.SphereGeometry(980, 24, 16);
+  const goldenDome = new THREE.Mesh(domeGeo, new THREE.MeshBasicMaterial({ map: goldenTex, side: THREE.BackSide, fog: false }));
+  const duskDome = new THREE.Mesh(domeGeo, new THREE.MeshBasicMaterial({ map: duskTex, side: THREE.BackSide, fog: false }));
+  duskDome.visible = false;
+  scene.add(goldenDome);
+  scene.add(duskDome);
 
-  const ambient = new THREE.AmbientLight(0x223044, 0.35);
-  scene.add(ambient);
-
-  // Cahaya isi hangat yang mengikuti pemain supaya area sekitarnya selalu
-  // terbaca di malam hari, tanpa perlu puluhan lampu titik.
-  const followLight = new THREE.PointLight(0xffc98a, 0.35, 42, 1.4);
-  followLight.position.set(0, 10, 0);
-  scene.add(followLight);
-
-  // Bintang-bintang redup di langit malam.
-  const starCount = 420;
-  const starPos = new Float32Array(starCount * 3);
-  for (let i = 0; i < starCount; i++) {
-    const a = Math.random() * Math.PI * 2;
-    const e = Math.random() * Math.PI * 0.42 + 0.08;
-    const r = 850;
-    starPos[i * 3] = Math.cos(a) * Math.cos(e) * r;
-    starPos[i * 3 + 1] = Math.sin(e) * r;
-    starPos[i * 3 + 2] = Math.sin(a) * Math.cos(e) * r;
-  }
-  const starGeo = new THREE.BufferGeometry();
-  starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
-  const starMat = new THREE.PointsMaterial({ color: 0xcdd8ff, size: 1.6, sizeAttenuation: false, transparent: true, opacity: 0.75, fog: false });
-  const stars = new THREE.Points(starGeo, starMat);
-  scene.add(stars);
-
-  // Bulan purnama: piringan terang + halo tipis.
-  const moonDisc = new THREE.Mesh(
-    new THREE.CircleGeometry(26, 32),
-    new THREE.MeshBasicMaterial({ color: 0xe8eefc, fog: false }),
+  const sunDisc = new THREE.Mesh(
+    new THREE.CircleGeometry(45, 32),
+    new THREE.MeshBasicMaterial({ color: 0xffc93a, transparent: true, opacity: 0.95, fog: false })
   );
-  moonDisc.position.set(-260, 300, -620);
-  moonDisc.lookAt(0, 0, 0);
-  scene.add(moonDisc);
-  const moonHalo = new THREE.Mesh(
-    new THREE.CircleGeometry(44, 32),
-    new THREE.MeshBasicMaterial({ color: 0x8fa8d8, transparent: true, opacity: 0.16, fog: false }),
+  sunDisc.position.set(-640, 40, 100);
+  sunDisc.lookAt(camera.position);
+  scene.add(sunDisc);
+  const sunHalo = new THREE.Mesh(
+    new THREE.CircleGeometry(120, 32),
+    new THREE.MeshBasicMaterial({ color: 0xffc37a, transparent: true, opacity: 0.22, fog: false, blending: THREE.AdditiveBlending, depthWrite: false })
   );
-  moonHalo.position.set(-260, 300, -625);
-  moonHalo.lookAt(0, 0, 0);
-  scene.add(moonHalo);
+  sunHalo.position.set(-645, 40, 100);
+  sunHalo.lookAt(camera.position);
+  scene.add(sunHalo);
 
-  // Hujan ringan: segmen garis jatuh di dalam kotak yang mengikuti kamera.
-  const dropCount = CONFIG.weather.rainDrops;
-  const rainPos = new Float32Array(dropCount * 2 * 3);
-  const drops = [];
-  for (let i = 0; i < dropCount; i++) {
-    drops.push({
-      x: (Math.random() - 0.5) * CONFIG.weather.rainArea,
-      y: Math.random() * CONFIG.weather.rainHeight,
-      z: (Math.random() - 0.5) * CONFIG.weather.rainArea,
-      speed: 26 + Math.random() * 10,
-      len: 0.9 + Math.random() * 0.7,
-    });
-  }
-  const rainGeo = new THREE.BufferGeometry();
-  rainGeo.setAttribute('position', new THREE.BufferAttribute(rainPos, 3));
-  const rainMat = new THREE.LineBasicMaterial({ color: 0x9db8d8, transparent: true, opacity: 0.26 });
-  const rain = new THREE.LineSegments(rainGeo, rainMat);
-  rain.frustumCulled = false;
+  const clouds = makeClouds(scene, cloudTexture());
+  const birds = makeBirds(scene);
+  const rain = makeRain();
   scene.add(rain);
+  const splashes = makeSplashes(scene);
 
-  return {
-    scene,
-    camera,
-    renderer,
-    lights: { hemi, moon, ambient, followLight },
-    stars,
-    moonDisc,
-    moonHalo,
-    rain: { mesh: rain, geo: rainGeo, pos: rainPos, drops },
-    focus: new THREE.Vector3(0, 1.5, 0),
-    camPos: new THREE.Vector3(188, 4, -140),
-    elapsed: 0,
+  const world = {
+    scene, camera, renderer,
+    lights: { hemi, sun, amb, fill },
+    goldenDome, duskDome, sunDisc, sunHalo, clouds, birds, rain, splashes,
+    elapsed: 0, lastNow: performance.now(), rainSeed: [],
   };
-}
-
-function daylightFactor(hour) {
-  // 0 di tengah malam, 1 di tengah hari; transisi halus saat fajar/senja.
-  const h = ((hour % 24) + 24) % 24;
-  if (h >= 6 && h <= 18) {
-    const t = (h - 6) / 12;
-    return Math.sin(t * Math.PI);
+  const posAttr = rain.geometry.getAttribute('position');
+  for (let i = 0; i < 460; i++) {
+    world.rainSeed.push({ x: posAttr.getX(i * 2), y: posAttr.getY(i * 2), z: posAttr.getZ(i * 2) });
   }
-  if (h > 18 && h < 20) return 1 - (h - 18) / 2;
-  if (h >= 4 && h < 6) return (h - 4) / 2;
-  return 0;
+  return world;
 }
 
-function applyTimeOfDay(world, state) {
-  const hour = state && state.clock && typeof state.clock.hour === 'number'
-    ? state.clock.hour
-    : CONFIG.time.startHour;
-  const day = daylightFactor(hour);
-  const { scene, lights } = world;
-  mixColor(scene.background, NIGHT.sky, DAY.sky, day);
-  mixColor(scene.fog.color, NIGHT.fog, DAY.fog, day);
-  mixColor(lights.hemi.color, NIGHT.hemiSky, DAY.hemiSky, day);
-  mixColor(lights.hemi.groundColor, NIGHT.hemiGround, DAY.hemiGround, day);
-  lights.hemi.intensity = NIGHT.hemiIntensity + (DAY.hemiIntensity - NIGHT.hemiIntensity) * day;
-  mixColor(lights.moon.color, NIGHT.moonColor, DAY.moonColor, day);
-  lights.moon.intensity = NIGHT.moonIntensity + (DAY.moonIntensity - NIGHT.moonIntensity) * day;
-  lights.ambient.intensity = 0.35 + 0.25 * day;
-  world.stars.material.opacity = 0.75 * (1 - day);
-  world.stars.visible = day < 0.85;
-  world.moonDisc.material.opacity = 1;
-  world.moonDisc.visible = day < 0.9;
-  world.moonHalo.visible = day < 0.9;
-  return day;
+function shotOf(state) {
+  return (state && state.shotName) || '';
 }
 
-function updateRain(world, state, dt) {
-  const { mesh, geo, pos, drops } = world.rain;
-  const intensity = state && state.weather && typeof state.weather.rainIntensity === 'number'
-    ? state.weather.rainIntensity
-    : CONFIG.weather.rainIntensity;
-  mesh.visible = intensity > 0.02;
-  if (!mesh.visible) return;
-  mesh.material.opacity = 0.1 + 0.2 * intensity;
-  const cx = world.focus.x;
-  const cz = world.focus.z;
-  const area = CONFIG.weather.rainArea;
-  const height = CONFIG.weather.rainHeight;
-  for (let i = 0; i < drops.length; i++) {
-    const d = drops[i];
-    d.y -= d.speed * dt;
-    if (d.y < 0) {
-      d.y = height;
-      d.x = (Math.random() - 0.5) * area;
-      d.z = (Math.random() - 0.5) * area;
+function heroCarOf(state) {
+  if (state && state.player && state.player.car) return state.player.car;
+  return null;
+}
+
+function updateCamera(world, state, dt) {
+  const camera = world.camera;
+  const shot = shotOf(state);
+  const player = state && state.player;
+  const car = heroCarOf(state);
+  const t = world.elapsed;
+  if (shot === 'map') {
+    camera.position.set(0, 420, 320);
+    camera.lookAt(0, 0, 0);
+    if (camera.fov !== 55) { camera.fov = 55; camera.updateProjectionMatrix(); }
+    return;
+  }
+  if (shot === 'title') {
+    const px = 96 + Math.sin(t * 0.05) * 5;
+    camera.position.set(px, 6.5, 116);
+    camera.lookAt(15, 2.5, 98);
+    if (camera.fov !== 58) { camera.fov = 58; camera.updateProjectionMatrix(); }
+    return;
+  }
+  if (car && car.group) {
+    const gp = car.group.position;
+    const h = car.heading || 0;
+    const fx = Math.sin(h);
+    const fz = Math.cos(h);
+    const back = shot === 'chase' ? 5.0 : 7.4;
+    const height = shot === 'chase' ? 2.4 : 3.5;
+    const tx = gp.x - fx * back;
+    const tz = gp.z - fz * back;
+    if (shot === 'chase') {
+      camera.position.set(tx, height, tz);
+    } else {
+      camera.position.x += (tx - camera.position.x) * Math.min(1, dt * 7);
+      camera.position.y += (height - camera.position.y) * Math.min(1, dt * 7);
+      camera.position.z += (tz - camera.position.z) * Math.min(1, dt * 7);
     }
-    const wx = cx + d.x;
-    const wz = cz + d.z;
-    pos[i * 6] = wx;
-    pos[i * 6 + 1] = d.y + d.len;
-    pos[i * 6 + 2] = wz;
-    pos[i * 6 + 3] = wx;
-    pos[i * 6 + 4] = d.y;
-    pos[i * 6 + 5] = wz;
+    camera.lookAt(gp.x + fx * 9, shot === 'chase' ? 2.2 : 1.05, gp.z + fz * 9);
+    const wantFov = shot === 'chase' ? 64 : 58;
+    if (camera.fov !== wantFov) { camera.fov = wantFov; camera.updateProjectionMatrix(); }
+    return;
   }
-  geo.attributes.position.needsUpdate = true;
+  if (player && player.group) {
+    const gp = player.group.position;
+    const h = player.heading || 0;
+    const fx = Math.sin(h);
+    const fz = Math.cos(h);
+    const back = shot === 'shootout' ? 6.5 : 5.0;
+    const height = shot === 'shootout' ? 3.4 : 3.0;
+    camera.position.set(gp.x - fx * back, height, gp.z - fz * back);
+    camera.lookAt(gp.x + fx * 7, 1.5, gp.z + fz * 7);
+    if (camera.fov !== 58) { camera.fov = 58; camera.updateProjectionMatrix(); }
+    return;
+  }
+  camera.position.set(60, 8, 130);
+  camera.lookAt(0, 2, 100);
 }
 
-function readHeading(entity) {
-  if (!entity) return 0;
-  if (typeof entity.heading === 'number') return entity.heading;
-  if (entity.group && typeof entity.group.rotation === 'object') return entity.group.rotation.y || 0;
-  if (typeof entity.rotationY === 'number') return entity.rotationY;
-  return 0;
-}
-
-function readPosition(entity, out) {
-  if (!entity) return false;
-  const p = entity.position || entity.pos || null;
-  if (!p) return false;
-  out.set(p.x || 0, p.y || 0, p.z || 0);
-  return true;
+function animateSky(world, state, dt) {
+  const t = world.elapsed;
+  const shot = shotOf(state);
+  const dusk = shot === 'shootout';
+  world.goldenDome.visible = !dusk;
+  world.duskDome.visible = dusk;
+  if (dusk) {
+    world.scene.fog.color.setHex(0x9a7bb8);
+    world.scene.fog.near = 80;
+    world.scene.fog.far = 560;
+    world.lights.sun.intensity = 1.0;
+    world.lights.sun.color.setHex(0xff9e7a);
+    world.lights.hemi.intensity = 0.7;
+    world.lights.hemi.color.setHex(0xc9a0d8);
+    world.lights.amb.intensity = 0.4;
+    world.sunDisc.material.opacity = 0.55;
+    world.sunHalo.material.opacity = 0.15;
+  } else {
+    world.scene.fog.color.setHex(0xdd8855);
+    world.scene.fog.near = 160;
+    world.scene.fog.far = 700;
+    world.lights.sun.intensity = 1.2;
+    world.lights.sun.color.setHex(0xffb36b);
+    world.lights.hemi.intensity = 0.55;
+    world.lights.hemi.color.setHex(0xffd9b0);
+    world.lights.amb.intensity = 0.25;
+    world.sunDisc.material.opacity = 0.95;
+    world.sunHalo.material.opacity = 0.22;
+  }
+  for (const cloud of world.clouds.children) {
+    cloud.position.x += cloud.userData.speed * dt;
+    if (cloud.position.x > 620) cloud.position.x = -620;
+  }
+  for (const bird of world.birds.children) {
+    bird.position.x += bird.userData.speed * dt;
+    bird.position.y += Math.sin(t * 1.4 + bird.userData.phase) * dt * 1.5;
+    if (bird.position.x > 420) bird.position.x = -420;
+    bird.rotation.y = -Math.PI / 2;
+  }
+  const rain = world.rain;
+  const attr = rain.geometry.getAttribute('position');
+  const cam = world.camera.position;
+  for (let i = 0; i < world.rainSeed.length; i++) {
+    const s = world.rainSeed[i];
+    s.y -= 30 * dt;
+    if (s.y < 0) {
+      s.y = 30 + Math.random() * 4;
+      s.x = cam.x + (Math.random() - 0.5) * 90;
+      s.z = cam.z + (Math.random() - 0.5) * 90;
+    }
+    attr.setXYZ(i * 2, s.x, s.y, s.z);
+    attr.setXYZ(i * 2 + 1, s.x + 0.4, s.y - 1.8, s.z);
+  }
+  attr.needsUpdate = true;
+  const roadZ = shot === 'shootout' ? 300 : 100;
+  for (const ring of world.splashes) {
+    if (Math.abs(ring.position.x - cam.x) > 70) {
+      ring.position.x = cam.x + (Math.random() - 0.5) * 130;
+      ring.position.z = roadZ + (Math.random() - 0.5) * 24;
+    }
+    ring.userData.phase += dt * 0.55;
+    if (ring.userData.phase > 1) ring.userData.phase = 0;
+    const p = ring.userData.phase;
+    const sc = 0.4 + p * 1.6;
+    ring.scale.set(sc, sc, sc);
+    ring.material.opacity = (1 - p) * 0.45;
+  }
+  const anim = world.scene.userData.cityAnim;
+  if (anim) {
+    for (const item of anim.neon || []) {
+      const pulse = 0.82 + 0.18 * Math.sin(t * 1.4 + item.phase);
+      if (item.glow) item.glow.material.opacity = 0.28 * pulse;
+    }
+    for (const palm of anim.palms || []) {
+      palm.rotation.z = Math.sin(t * 0.9 + palm.userData.phase) * 0.05;
+      palm.rotation.x = Math.cos(t * 0.7 + palm.userData.phase) * 0.03;
+    }
+    for (const puff of anim.steam || []) {
+      puff.userData.phase += dt * 0.25;
+      if (puff.userData.phase > 1) puff.userData.phase = 0;
+      const p = puff.userData.phase;
+      puff.position.y = puff.userData.baseY + p * 7;
+      puff.scale.setScalar(0.8 + p * 1.8);
+      puff.material.opacity = (1 - p) * 0.4;
+    }
+  }
 }
 
 export function drawWorld(world, state) {
-  // Terima tiga bentuk pemanggilan: (world, state), (null, state), dan
-  // (state) saja — bila argumen pertama ternyata keadaan bersama (punya
-  // field world tapi bukan renderer), pakai dunia dari dalamnya.
-  if (state === undefined && world && world.world) {
-    state = world;
-    world = world.world;
-  }
-  // Dunia boleh datang dari argumen pertama, atau dari keadaan bersama
-  // (state.world) bila pemanggil hanya meneruskan state.
-  world = world || (state && state.world) || null;
-  if (!world || !world.renderer) return;
-  let dt = state && typeof state.dt === 'number' ? Math.min(state.dt, 0.05) : 0.016;
-  if (!Number.isFinite(dt) || dt <= 0) dt = 0.016;
+  const now = performance.now();
+  let dt = (now - world.lastNow) / 1000;
+  world.lastNow = now;
+  if (!(dt > 0) || dt > 0.1) dt = 0.016;
   world.elapsed += dt;
-  applyTimeOfDay(world, state);
-
-  const cam = world.camera;
-  const mode = state && state.mode ? state.mode : 'play';
-  // Mode shot: staging shot sudah memosisikan kamera lewat world.camera dan
-  // menandai state.shotCamera / state.cameraMode = 'shot'. Jangan pernah
-  // menimpa kamera di mode ini; cukup arahkan cahaya mengikuti kameranya.
-  const shotActive = !!state && (state.shotCamera === true || state.cameraMode === 'shot');
-  const tmp = new THREE.Vector3();
-
-  if (shotActive) {
-    const dir = new THREE.Vector3();
-    cam.getWorldDirection(dir);
-    world.focus.copy(cam.position).addScaledVector(dir, 26);
-    world.focus.y = Math.max(1.2, world.focus.y);
-  } else if (mode === 'map') {
-    // Peta layar penuh: kamera tegak lurus dari atas pusat kota.
-    world.focus.set(0, 0, 0);
-    cam.position.set(0, 430, 0.5);
-    cam.lookAt(0, 0, 0);
-    cam.up.set(0, 0, -1);
-  } else if (mode === 'title' || !state || !state.player) {
-    // Layar judul: dolly pelan menyusuri avenue CBD di ketinggian jalan.
-    const dolly = CONFIG.titleDolly;
-    const span = dolly.zMax - dolly.zMin;
-    const z = dolly.zMin + ((world.elapsed * dolly.speed) % span + span) % span;
-    world.focus.set(dolly.avenueX, 2.2, z + 26);
-    tmp.set(dolly.avenueX + Math.sin(world.elapsed * 0.12) * 3, dolly.height, z);
-    world.camPos.lerp(tmp, 1 - Math.exp(-dt * 2));
-    cam.position.copy(world.camPos);
-    cam.lookAt(world.focus);
-    cam.up.set(0, 1, 0);
-  } else {
-    // Bermain: kamera mengikuti dari belakang pemain atau mobilnya.
-    const player = state.player;
-    const vehicle = player.car || null;
-    const subject = vehicle || player;
-    if (readPosition(subject, tmp)) {
-      world.focus.copy(tmp);
-      world.focus.y += 1.4;
-    }
-    const heading = readHeading(vehicle || player);
-    // Arah hadap mengikuti konvensi three.js: depan objek adalah -Z lokal.
-    const fx = -Math.sin(heading);
-    const fz = -Math.cos(heading);
-    const dist = vehicle ? CONFIG.camera.chaseDistance : CONFIG.camera.onFootDistance;
-    const height = vehicle ? CONFIG.camera.chaseHeight : CONFIG.camera.onFootHeight;
-    tmp.set(
-      world.focus.x - fx * dist,
-      world.focus.y + height,
-      world.focus.z - fz * dist,
-    );
-    const blend = 1 - Math.exp(-dt * CONFIG.camera.smooth);
-    world.camPos.lerp(tmp, blend);
-    cam.position.copy(world.camPos);
-    const look = new THREE.Vector3(
-      world.focus.x + fx * CONFIG.camera.lookAhead,
-      world.focus.y + 0.6,
-      world.focus.z + fz * CONFIG.camera.lookAhead,
-    );
-    cam.lookAt(look);
-    cam.up.set(0, 1, 0);
-    // FOV melebar sedikit saat mobil melaju kencang.
-    const speed = vehicle && typeof vehicle.speed === 'number' ? vehicle.speed : 0;
-    const targetFov = CONFIG.camera.fov + Math.min(9, Math.max(0, speed - 60) * 0.09);
-    if (Math.abs(cam.fov - targetFov) > 0.05) {
-      cam.fov += (targetFov - cam.fov) * Math.min(1, dt * 3);
-      cam.updateProjectionMatrix();
-    }
+  ensureCityMeshes(state, world.scene);
+  if (world.renderer.domElement.width !== window.innerWidth || world.renderer.domElement.height !== window.innerHeight) {
+    resizeWorld(world);
   }
-
-  // Guncangan layar saat combat (state.shake 0..1 dari modul combat).
-  if (state && state.shake > 0.01) {
-    cam.position.x += (Math.random() - 0.5) * state.shake * 0.5;
-    cam.position.y += (Math.random() - 0.5) * state.shake * 0.35;
-  }
-
-  // Bayangan bulan mengikuti titik fokus supaya tetap tajam di sekitar pemain.
-  world.lights.moon.position.set(world.focus.x + 120, 220, world.focus.z - 80);
-  world.lights.moon.target.position.copy(world.focus);
-  world.lights.moon.target.updateMatrixWorld();
-  // Cahaya isi menempel di kamera (bukan di titik fokus) supaya tidak ada
-  // genangan terang yang mengambang di tengah jalan di depan kamera.
-  world.lights.followLight.position.set(cam.position.x, cam.position.y + 6, cam.position.z);
-
-  // Pengaman: bila posisi kamera pernah menjadi NaN (misalnya dt rusak dari
-  // pemanggil), kembalikan ke titik pandang avenue yang aman daripada
-  // menampilkan layar hitam tanpa error.
-  if (!Number.isFinite(cam.position.x) || !Number.isFinite(cam.position.y) || !Number.isFinite(cam.position.z)) {
-    cam.position.set(CONFIG.titleDolly.avenueX, CONFIG.titleDolly.height, CONFIG.titleDolly.zMin);
-    world.camPos.copy(cam.position);
-  }
-
-  updateRain(world, state, dt);
-  world.renderer.render(world.scene, cam);
+  updateCamera(world, state, dt);
+  animateSky(world, state, dt);
+  world.renderer.render(world.scene, world.camera);
 }
 
 export function resizeWorld(world) {
-  if (world && !world.renderer && world.world) world = world.world;
-  if (!world || !world.renderer || !world.camera) return;
-  const w = window.innerWidth;
-  const h = Math.max(1, window.innerHeight);
-  world.camera.aspect = w / h;
+  world.renderer.setSize(window.innerWidth, window.innerHeight);
+  world.camera.aspect = window.innerWidth / window.innerHeight;
   world.camera.updateProjectionMatrix();
-  world.renderer.setSize(w, h);
 }

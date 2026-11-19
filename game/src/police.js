@@ -1,347 +1,193 @@
-import { CONFIG } from './config.js';
-import { buildHumanoidMesh } from './player.js';
-import { spawnCar, roadList, damageCar } from './vehicles.js';
+import 'three';
+const THREE = window.THREE;
+import { buildCarMesh } from './vehicles.js';
 
-function pickNumber(candidates, fallback) {
-  for (const value of candidates) {
-    if (typeof value === 'number' && Number.isFinite(value)) return value;
-  }
-  return fallback;
+const UNIT_NAMES = [
+  { name: 'GARUDA-1', kind: 'heli', status: 'SOROT' },
+  { name: 'CENDRAWASIH-07', kind: 'car', status: 'MENGEJAR' },
+  { name: 'JALAK-42', kind: 'car', status: 'MENABRAK' },
+  { name: 'BANGAU-18', kind: 'car', status: 'MENGEJAR' },
+  { name: 'KAKATUA-31', kind: 'car', status: 'MENGEJAR' },
+  { name: 'GARUDA-02', kind: 'car', status: 'PENGEJARAN' },
+  { name: 'ELANG-09', kind: 'foot', status: 'PENGEJARAN' },
+  { name: 'MERAK-12', kind: 'foot', status: 'PENGEJARAN' },
+  { name: 'CENDRAWASIH-21', kind: 'foot', status: 'PENGEJARAN' },
+];
+
+function wantedOf(state) {
+  return state.wanted || 0;
 }
 
-const OFFICER_NAMES = [
-  'CENDRAWASIH-07', 'JALAK-42', 'BANGAU-18', 'KAKATUA-31',
-  'GARUDA-02', 'ELANG-15', 'MERAK-09', 'KUNTUL-23', 'RAJAWALI-55',
-];
-const FOOT_WANTED = [0, 2, 2, 3, 3, 4];
-const CAR_WANTED = [0, 0, 1, 2, 3, 4];
-
-let nameCursor = 0;
-function nextOfficerName(used) {
-  for (let i = 0; i < OFFICER_NAMES.length * 2; i++) {
-    const name = OFFICER_NAMES[nameCursor % OFFICER_NAMES.length];
-    nameCursor++;
-    if (!used.has(name)) return name;
-  }
-  return 'POLISI-' + (100 + Math.floor(Math.random() * 800));
+function playerPos(state) {
+  if (state.player && state.player.group) return state.player.group.position;
+  if (state.player && state.player.position) return state.player.position;
+  return new THREE.Vector3(40, 0, 100);
 }
 
 export function createPolice(state) {
-  const police = {
-    units: [],
-    foot: [],
-    cars: [],
-    roadblocks: [],
-    count: 0,
-    nearby: 9999,
-    hideTimer: 0,
-    sirenTimer: 0,
-    lastWanted: 0,
-    clearUnits: () => clearPoliceUnits(state),
-  };
-  state.police = police;
-  state.policeApi = {
-    setWanted: (st, level) => setWanted(st, level),
-    addHeat: (st, amount) => addHeat(st, amount),
-  };
-  return police;
-}
-
-export function setWanted(state, level) {
-  const clamped = Math.max(0, Math.min(5, Math.round(level)));
-  const before = state.wanted || 0;
-  state.wanted = clamped;
-  if (clamped > before) {
-    state.police.hideTimer = 0;
-    if (clamped >= 3) {
-      state.ui?.banner?.('Polisi Teluk Cerah — KODE ' + clamped);
+  const scene = state.world.scene;
+  const units = [];
+  const cars = [];
+  const home = playerPos(state);
+  for (let i = 0; i < UNIT_NAMES.length; i++) {
+    const def = UNIT_NAMES[i];
+    const unit = {
+      name: def.name,
+      kind: def.kind,
+      status: def.status,
+      distance: 6 + i * 4,
+      car: null,
+      group: null,
+      position: new THREE.Vector3(home.x + 20 + i * 8, 0, home.z + 10),
+      speed: 0,
+      heading: 0,
+      flashPhase: i * 0.5,
+      slot: i,
+    };
+    if (def.kind === 'car') {
+      const built = buildCarMesh('police', 0xf2f2f2, {});
+      const car = {
+        group: built.group,
+        kind: 'police',
+        speed: 0,
+        maxSpeed: 24,
+        heading: 0,
+        angle: 0,
+        health: 100,
+        condition: 95,
+        driver: null,
+        parked: false,
+        wheels: built.wheels,
+        paintMat: built.paintMat,
+        barL: built.barL,
+        barR: built.barR,
+        poolL: built.poolL,
+        poolR: built.poolR,
+        position: built.group.position,
+      };
+      car.group.position.set(home.x + 24 + i * 9, 0, home.z + (i % 2 === 0 ? 6 : -6));
+      car.heading = -Math.PI / 2;
+      car.group.rotation.y = car.heading;
+      scene.add(car.group);
+      unit.car = car;
+      unit.group = car.group;
+      unit.position = car.group.position;
+      cars.push(car);
     }
+    units.push(unit);
   }
-  if (clamped === 0) {
-    state.police.hideTimer = 0;
-  }
-  return clamped;
+  state.police = units;
+  state.policeCars = cars;
+  return units;
 }
 
-export function addHeat(state, amount) {
-  const next = Math.max(0, Math.min(5, (state.wanted || 0) + amount));
-  if (next > (state.wanted || 0)) {
-    state.wanted = next;
-    state.police.hideTimer = 0;
+function flashBars(unit, t) {
+  if (!unit.car) return;
+  const phase = Math.floor(t * 3.2 + unit.flashPhase) % 2;
+  const car = unit.car;
+  if (car.barL && car.barL.material) {
+    car.barL.material.color.setHex(phase === 0 ? 0xff2233 : 0x881122);
   }
-  return state.wanted;
-}
-
-function clearPoliceUnits(state) {
-  const police = state.police;
-  if (!police) return;
-  for (const unit of police.foot) {
-    state.scene.remove(unit.group);
+  if (car.barR && car.barR.material) {
+    car.barR.material.color.setHex(phase === 0 ? 0x112266 : 0x2266ff);
   }
-  for (const car of police.cars) {
-    state.scene.remove(car.group);
-    const idx = (state.cars || []).indexOf(car);
-    if (idx >= 0) state.cars.splice(idx, 1);
-  }
-  for (const car of police.roadblocks) {
-    state.scene.remove(car.group);
-    const idx = (state.cars || []).indexOf(car);
-    if (idx >= 0) state.cars.splice(idx, 1);
-  }
-  police.foot = [];
-  police.cars = [];
-  police.roadblocks = [];
-  police.units = police.units.filter((u) => u.type === 'heli');
-}
-
-function spawnFootOfficer(state) {
-  const player = state.player;
-  const used = new Set((state.police?.units || []).map((u) => u.name));
-  const angle = Math.random() * Math.PI * 2;
-  const dist = 34 + Math.random() * 30;
-  const x = player.position.x + Math.cos(angle) * dist;
-  const z = player.position.z + Math.sin(angle) * dist;
-  const group = buildHumanoidMesh({
-    skin: 0xc98d5f, shirt: 0x1d3a6e, pants: 0x16233a, hat: 0x12203a,
-  });
-  group.position.set(x, 0, z);
-  state.scene.add(group);
-  const officer = {
-    group,
-    position: group.position,
-    heading: 0,
-    speed: 0,
-    runSpeed: 6.4,
-    walkPhase: Math.random() * 6,
-    name: nextOfficerName(used),
-    type: 'foot',
-    status: 'PENGEJARAN',
-    distance: dist,
-    stuckTimer: 0,
-  };
-  state.police.foot.push(officer);
-  return officer;
-}
-
-function spawnPoliceCar(state) {
-  const player = state.player;
-  const used = new Set((state.police?.units || []).map((u) => u.name));
-  const angle = Math.random() * Math.PI * 2;
-  const dist = 46 + Math.random() * 26;
-  const x = player.position.x + Math.cos(angle) * dist;
-  const z = player.position.z + Math.sin(angle) * dist;
-  const car = spawnCar(state, 'police', x, z, Math.atan2(player.position.x - x, player.position.z - z), 'ai');
-  car.police = true;
-  car.siren = true;
-  car.targetSpeed = 26 + (state.wanted || 1) * 2;
-  car.name = nextOfficerName(used);
-  state.cars.push(car);
-  state.police.cars.push(car);
-  return car;
-}
-
-function placeRoadblock(state) {
-  const player = state.player;
-  const roads = roadList(state);
-  const car = player.car;
-  const ahead = car
-    ? { x: car.position.x + Math.sin(car.heading) * 55, z: car.position.z + Math.cos(car.heading) * 55, heading: car.heading }
-    : { x: player.position.x + Math.sin(player.heading) * 45, z: player.position.z + Math.cos(player.heading) * 45, heading: player.heading };
-  const block = [];
-  for (const side of [-1, 1]) {
-    const px = ahead.x + Math.cos(ahead.heading) * 3.4 * side;
-    const pz = ahead.z - Math.sin(ahead.heading) * 3.4 * side;
-    const unit = spawnCar(state, 'police', px, pz, ahead.heading + Math.PI / 2, 'none');
-    unit.police = true;
-    unit.siren = true;
-    unit.roadblock = true;
-    state.cars.push(unit);
-    state.police.roadblocks.push(unit);
-    block.push(unit);
-  }
-  state.ui?.banner?.('Roadblock di depan! Cari jalan lain.');
-  return block;
-}
-
-function updateFootOfficer(state, officer, dt) {
-  const player = state.player;
-  const dx = player.position.x - officer.position.x;
-  const dz = player.position.z - officer.position.z;
-  const d = Math.hypot(dx, dz);
-  officer.distance = d;
-  const wantHeading = Math.atan2(dx, dz);
-  let diff = wantHeading - officer.heading;
-  while (diff > Math.PI) diff -= Math.PI * 2;
-  while (diff < -Math.PI) diff += Math.PI * 2;
-  officer.heading += diff * Math.min(1, dt * 6);
-
-  const playerSpeed = player.car
-    ? Math.abs(player.car.speed)
-    : Math.abs(player.speedKmh || 0) / 3.6;
-  let runSpeed = officer.runSpeed;
-  if (playerSpeed > 8) runSpeed = officer.runSpeed * 0.75;
-  officer.speed = runSpeed;
-  officer.position.x += Math.sin(officer.heading) * runSpeed * dt;
-  officer.position.z += Math.cos(officer.heading) * runSpeed * dt;
-  officer.group.rotation.y = officer.heading;
-  officer.walkPhase += dt * runSpeed * 3.2;
-  const limbs = officer.group.userData.limbs;
-  if (limbs) {
-    const swing = Math.sin(officer.walkPhase) * 0.8;
-    limbs.legL.rotation.x = swing;
-    limbs.legR.rotation.x = -swing;
-    limbs.armL.rotation.x = -swing * 0.7;
-    limbs.armR.rotation.x = swing * 0.7;
-  }
-  officer.status = d < 12 ? 'PENANGKAPAN' : 'PENGEJARAN';
-
-  if (d < 1.7 && !player.dead) {
-    if (player.car && Math.abs(player.car.speed) > 6) {
-      officer.position.x -= Math.sin(officer.heading) * 2.5;
-      officer.position.z -= Math.cos(officer.heading) * 2.5;
-      state.playerApi?.damagePlayer?.(state, 8);
-      return;
-    }
-    state.playerApi?.bustPlayer?.(state);
-  }
-}
-
-function updatePoliceCar(state, car, dt) {
-  const player = state.player;
-  const dx = player.position.x - car.position.x;
-  const dz = player.position.z - car.position.z;
-  const d = Math.hypot(dx, dz);
-  const target = player.car || player;
-  const targetSpeedMs = target === player
-    ? (player.speedKmh || 0) / 3.6
-    : (target.speed || 0);
-  const tx = target.position.x + Math.sin(target.heading || 0) * targetSpeedMs * 0.35;
-  const tz = target.position.z + Math.cos(target.heading || 0) * targetSpeedMs * 0.35;
-  const wantHeading = Math.atan2(tx - car.position.x, tz - car.position.z);
-  let diff = wantHeading - car.heading;
-  while (diff > Math.PI) diff -= Math.PI * 2;
-  while (diff < -Math.PI) diff += Math.PI * 2;
-  car.heading += diff * Math.min(1, dt * 2.4);
-  const wanted = state.wanted || 1;
-  const cruise = 24 + wanted * 3;
-  const nearPlayer = d < 10;
-  const wantSpeed = nearPlayer ? cruise * 1.15 : cruise;
-  car.speed += Math.sign(wantSpeed - car.speed) * Math.min(Math.abs(wantSpeed - car.speed), car.accel * dt);
-  car.position.x += Math.sin(car.heading) * car.speed * dt;
-  car.position.z += Math.cos(car.heading) * car.speed * dt;
-  car.group.rotation.y = car.heading;
-
-  if (d < 5.5) {
-    const playerCar = player.car;
-    if (playerCar && Math.abs(car.speed) > 4) {
-      car.speed *= 0.55;
-      playerCar.speed *= 0.7;
-      damageCar(state, playerCar, Math.abs(car.speed) * 1.2);
-      damageCar(state, car, 4);
-      state.combatApi?.addShake?.(state, 0.35);
-      state.audioApi?.play?.('punch');
-    }
-  }
-  car.status = d < 8 ? 'RAMMING' : 'PURSUIT';
-  car.distance = d;
+  if (car.poolL) car.poolL.material.opacity = phase === 0 ? 0.55 : 0.05;
+  if (car.poolR) car.poolR.material.opacity = phase === 0 ? 0.05 : 0.55;
 }
 
 export function updatePolice(state, dt) {
-  const police = state.police;
-  const player = state.player;
-  if (!police || !player) return;
-  const wanted = state.wanted || 0;
+  const units = state.police || [];
+  if (units.length === 0) return;
+  const t = (state.world && state.world.elapsed !== undefined ? state.world.elapsed : performance.now() / 1000);
+  const wanted = wantedOf(state);
+  const pp = playerPos(state);
+  const hero = state.player && state.player.car ? state.player.car : null;
+  const shot = state.shotName || '';
 
-  const wantFoot = FOOT_WANTED[wanted] || 0;
-  const wantCars = CAR_WANTED[wanted] || 0;
-
-  while (police.foot.length < wantFoot && !player.dead) spawnFootOfficer(state);
-  while (police.foot.length > wantFoot) {
-    const gone = police.foot.pop();
-    state.scene.remove(gone.group);
-  }
-  while (police.cars.length < wantCars && !player.dead) spawnPoliceCar(state);
-  while (police.cars.length > wantCars) {
-    const gone = police.cars.pop();
-    state.scene.remove(gone.group);
-    const idx = (state.cars || []).indexOf(gone);
-    if (idx >= 0) state.cars.splice(idx, 1);
-  }
-
-  const wantBlock = wanted >= 4;
-  if (wantBlock && police.roadblocks.length === 0 && !player.dead) {
-    placeRoadblock(state);
-  }
-  if (!wantBlock && police.roadblocks.length > 0) {
-    for (const car of police.roadblocks) {
-      state.scene.remove(car.group);
-      const idx = (state.cars || []).indexOf(car);
-      if (idx >= 0) state.cars.splice(idx, 1);
+  for (const unit of units) {
+    if (unit.kind === 'heli') {
+      unit.distance = 11;
+      continue;
     }
-    police.roadblocks = [];
-  }
-
-  for (const officer of police.foot) updateFootOfficer(state, officer, dt);
-  for (const car of police.cars) updatePoliceCar(state, car, dt);
-
-  let nearest = Infinity;
-  const units = [];
-  for (const officer of police.foot) {
-    nearest = Math.min(nearest, officer.distance);
-    units.push({
-      name: officer.name, type: 'foot', status: officer.status,
-      distance: Math.round(officer.distance),
-    });
-  }
-  for (const car of police.cars) {
-    nearest = Math.min(nearest, car.distance || Infinity);
-    units.push({
-      name: car.name || 'POLISI', type: 'car', status: car.status || 'PURSUIT',
-      distance: Math.round(car.distance || 0),
-    });
-  }
-  if (state.helicopter && state.helicopter.mode !== 'idle' && state.helicopter.mode !== 'hidden') {
-    const hd = Math.hypot(
-      state.helicopter.position.x - player.position.x,
-      state.helicopter.position.z - player.position.z,
-    );
-    nearest = Math.min(nearest, hd);
-    units.push({
-      name: 'GARUDA-1', type: 'heli', status: 'SPOTLIGHT',
-      distance: Math.round(hd),
-    });
+    if (!unit.car) {
+      const dx = pp.x - unit.position.x;
+      const dz = pp.z - unit.position.z;
+      const d = Math.hypot(dx, dz) || 1;
+      unit.distance = Math.round(d);
+      if (wanted > 0 && d > 1.4 && shot !== 'shootout') {
+        const sp = 5.5 * (1 + wanted * 0.12);
+        unit.position.x += (dx / d) * sp * dt;
+        unit.position.z += (dz / d) * sp * dt;
+      }
+      continue;
+    }
+    const car = unit.car;
+    flashBars(unit, t);
+    if (shot === 'shootout') {
+      car.speed = 0;
+    } else if (shot === 'chase' && hero) {
+      const slot = unit.slot || 0;
+      const hx = hero.group.position.x;
+      const hz = hero.group.position.z;
+      const hh = hero.heading || 0;
+      const fx = Math.sin(hh);
+      const fz = Math.cos(hh);
+      let tx = hx;
+      let tz = hz;
+      if (slot === 1) {
+        tx = hx + fx * 2 + fz * 4.5;
+        tz = hz + fz * 2 - fx * 4.5;
+      } else if (slot === 2) {
+        tx = hx + fx * 2 - fz * 4.5;
+        tz = hz + fz * 2 + fx * 4.5;
+      } else if (slot === 3) {
+        tx = hx + fx * 25;
+        tz = hz + fz * 25;
+      } else {
+        const d = 12 + slot * 5;
+        tx = hx - fx * d;
+        tz = hz - fz * d;
+      }
+      car.group.position.x += (tx - car.group.position.x) * Math.min(1, dt * 3);
+      car.group.position.z += (tz - car.group.position.z) * Math.min(1, dt * 3);
+      if (shot === 'chase') {
+        car.group.position.x = tx;
+        car.group.position.z = tz;
+      }
+      car.heading = hh;
+      car.group.rotation.y = hh;
+      car.speed = hero.speed || 0;
+    } else if (wanted > 0) {
+      const dx = pp.x - car.group.position.x;
+      const dz = pp.z - car.group.position.z;
+      const d = Math.hypot(dx, dz) || 1;
+      const want = Math.atan2(dx, dz);
+      let diff = want - car.heading;
+      while (diff > Math.PI) diff -= Math.PI * 2;
+      while (diff < -Math.PI) diff += Math.PI * 2;
+      car.heading += Math.max(-2.4 * dt, Math.min(2.4 * dt, diff * 2.2));
+      car.angle = car.heading;
+      car.group.rotation.y = car.heading;
+      const sp = Math.min(car.maxSpeed, 10 + wanted * 3.2);
+      car.speed += (sp - car.speed) * Math.min(1, dt * 1.5);
+      car.group.position.x += Math.sin(car.heading) * car.speed * dt;
+      car.group.position.z += Math.cos(car.heading) * car.speed * dt;
+      for (const w of car.wheels || []) w.rotation.x += (car.speed * dt) / 0.4;
+    } else {
+      car.speed = Math.max(0, car.speed - 10 * dt);
+    }
+    const pdx = pp.x - car.group.position.x;
+    const pdz = pp.z - car.group.position.z;
+    unit.distance = Math.round(Math.hypot(pdx, pdz));
+    if (wanted >= 4 && unit.name === 'JALAK-42') unit.status = 'MENABRAK';
   }
   units.sort((a, b) => a.distance - b.distance);
-  police.units = units;
-  police.count = units.length;
-  police.nearby = units.length > 0 ? units[0].distance : 9999;
+}
 
-  if (wanted > 0 && !player.dead) {
-    const heliWatching = state.helicopter && state.helicopter.mode === 'spotlight';
-    if (nearest > 55 && !heliWatching) {
-      police.hideTimer += dt;
-      const perStar = pickNumber([CONFIG?.police?.hideSecondsPerStar, 8], 8);
-      if (police.hideTimer >= perStar) {
-        police.hideTimer = 0;
-        setWanted(state, wanted - 1);
-        state.stats = state.stats || {};
-        if ((state.wanted || 0) === 0) {
-          state.stats.escapes = (state.stats.escapes || 0) + 1;
-          state.ui?.banner?.('Kamu lolos dari kejaran polisi.');
-        }
-      }
-    } else {
-      police.hideTimer = 0;
-    }
-  } else {
-    police.hideTimer = 0;
-  }
+export function setWanted(state, level) {
+  state.wanted = Math.max(0, Math.min(5, level || 0));
+}
 
-  if (wanted > 0 && police.cars.length > 0 && nearest < 70) {
-    police.sirenTimer -= dt;
-    if (police.sirenTimer <= 0) {
-      police.sirenTimer = 2.6;
-      state.audioApi?.play?.('siren');
-    }
-  }
+export function addHeat(state, amount) {
+  state.wanted = Math.max(0, Math.min(5, (state.wanted || 0) + (amount || 1)));
 }

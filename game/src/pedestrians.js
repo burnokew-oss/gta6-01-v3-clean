@@ -1,251 +1,231 @@
-import * as ThreeLib from 'three';
-const THREE = (ThreeLib && typeof ThreeLib.Scene === 'function') ? ThreeLib : (typeof globalThis !== 'undefined' && globalThis.THREE ? globalThis.THREE : (() => { throw new Error('Three.js is not available: the vendored module has no Scene export and no global THREE object exists on the page.'); })());
-import { CONFIG } from './config.js';
-import { buildHumanoidMesh } from './player.js';
-import { roadList } from './vehicles.js';
+import 'three';
+const THREE = window.THREE;
+import { netOf } from './vehicles.js';
 
-function pickNumber(candidates, fallback) {
-  for (const value of candidates) {
-    if (typeof value === 'number' && Number.isFinite(value)) return value;
-  }
-  return fallback;
+const SHIRTS = [0xd84a7a, 0x3a6ad8, 0x2f9e44, 0xe8a33a, 0x8a5ad8, 0xd8d8d8, 0xff6a5e, 0x4fd8c8];
+const PANTS = [0x22242c, 0x3a4a6a, 0x5a3a2a, 0x2a2a2a];
+const SKINS = [0xc98a5e, 0xe8b88a, 0x8a5a3a, 0xd8a070];
+const HAIRS = [0x141414, 0x3a2a1a, 0x6a6a6a, 0x8a4a2a];
+
+function limbMaterial(color) {
+  return new THREE.MeshLambertMaterial({ color });
 }
 
-const SHIRT_COLORS = [
-  0xe8e4d8, 0x7fb069, 0xd96a8b, 0x4a90d9, 0xe0a458, 0x8e6cc8,
-  0x3fa7a0, 0xc94f4f, 0x9b8de0, 0x5c7a5c, 0xd9c25a, 0x6b8cae,
-];
-const SKIN_TONES = [0xd9a066, 0xb97a4e, 0x8a5a34, 0xe8b98a, 0x6e4423];
-const PANTS_COLORS = [0x23283a, 0x4a3a2a, 0x3a4a5c, 0x5c5c5c, 0x2a2a2a];
+export function buildPersonFigure(opts) {
+  const o = opts || {};
+  const shirt = o.shirt !== undefined ? o.shirt : SHIRTS[Math.floor(Math.random() * SHIRTS.length)];
+  const pants = o.pants !== undefined ? o.pants : PANTS[Math.floor(Math.random() * PANTS.length)];
+  const skin = o.skin !== undefined ? o.skin : SKINS[Math.floor(Math.random() * SKINS.length)];
+  const hair = o.hair !== undefined ? o.hair : HAIRS[Math.floor(Math.random() * HAIRS.length)];
+  const scale = o.scale || 1;
+  const group = new THREE.Group();
 
-function randomSidewalkSpot(state, near, radius) {
-  const roads = roadList(state);
-  for (let tries = 0; tries < 12; tries++) {
-    const road = roads[Math.floor(Math.random() * roads.length)];
-    const t = Math.random();
-    const x = road.ax + (road.bx - road.ax) * t;
-    const z = road.az + (road.bz - road.az) * t;
-    const dx = x - near.x;
-    const dz = z - near.z;
-    const d = Math.hypot(dx, dz);
-    if (d < radius * 0.4 || d > radius) continue;
-    const heading = Math.atan2(road.bx - road.ax, road.bz - road.az);
-    const side = Math.random() < 0.5 ? 1 : -1;
-    const off = 5.6 + Math.random() * 1.4;
-    return {
-      x: x + Math.cos(heading) * off * side,
-      z: z - Math.sin(heading) * off * side,
-      heading: heading + (Math.random() < 0.5 ? 0 : Math.PI),
-    };
+  const shirtMat = limbMaterial(shirt);
+  const pantsMat = limbMaterial(pants);
+  const skinMat = limbMaterial(skin);
+  const hairMat = limbMaterial(hair);
+
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.72, 0.34), shirtMat);
+  torso.position.y = 1.18;
+  group.add(torso);
+  const jacket = new THREE.Mesh(new THREE.BoxGeometry(0.66, 0.2, 0.38), limbMaterial(o.jacket !== undefined ? o.jacket : shirt));
+  jacket.position.y = 1.44;
+  group.add(jacket);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.26, 12, 10), skinMat);
+  head.position.y = 1.78;
+  group.add(head);
+  const hairTop = new THREE.Mesh(new THREE.SphereGeometry(0.27, 12, 8), hairMat);
+  hairTop.scale.set(1, 0.6, 1);
+  hairTop.position.y = 1.92;
+  group.add(hairTop);
+  if (o.hat === 'bandana') {
+    const band = new THREE.Mesh(new THREE.BoxGeometry(0.54, 0.12, 0.54), limbMaterial(o.hatColor || 0xd83a3a));
+    band.position.y = 1.92;
+    group.add(band);
+  } else if (o.hat === 'cap') {
+    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.1, 12), limbMaterial(o.hatColor || 0x2f9e44));
+    cap.position.y = 1.96;
+    group.add(cap);
+    const brim = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.04, 0.24), limbMaterial(o.hatColor || 0x2f9e44));
+    brim.position.set(0, 1.93, 0.3);
+    group.add(brim);
+  } else if (o.hat === 'hijab') {
+    const hijab = new THREE.Mesh(new THREE.SphereGeometry(0.3, 12, 10), limbMaterial(o.hatColor || 0xd84a7a));
+    hijab.scale.set(1, 1.05, 1);
+    hijab.position.y = 1.8;
+    group.add(hijab);
   }
-  const angle = Math.random() * Math.PI * 2;
-  const r = radius * (0.4 + Math.random() * 0.5);
-  return { x: near.x + Math.cos(angle) * r, z: near.z + Math.sin(angle) * r, heading: angle };
-}
-
-function spawnPed(state, near, radius) {
-  const spot = randomSidewalkSpot(state, near, radius);
-  const shirt = SHIRT_COLORS[Math.floor(Math.random() * SHIRT_COLORS.length)];
-  const skin = SKIN_TONES[Math.floor(Math.random() * SKIN_TONES.length)];
-  const pants = PANTS_COLORS[Math.floor(Math.random() * PANTS_COLORS.length)];
-  const useHat = Math.random() < 0.35;
-  const group = buildHumanoidMesh({
-    skin,
-    shirt,
-    pants,
-    hat: useHat ? 0x2a2d34 : null,
-  });
-  const scale = 0.92 + Math.random() * 0.16;
+  const armL = new THREE.Group();
+  armL.position.set(-0.38, 1.5, 0);
+  const armLMesh = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.66, 0.18), shirtMat);
+  armLMesh.position.y = -0.33;
+  armL.add(armLMesh);
+  const handL = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.14, 0.16), skinMat);
+  handL.position.y = -0.68;
+  armL.add(handL);
+  group.add(armL);
+  const armR = new THREE.Group();
+  armR.position.set(0.38, 1.5, 0);
+  const armRMesh = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.66, 0.18), shirtMat);
+  armRMesh.position.y = -0.33;
+  armR.add(armRMesh);
+  const handR = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.14, 0.16), skinMat);
+  handR.position.y = -0.68;
+  armR.add(handR);
+  group.add(armR);
+  const legL = new THREE.Group();
+  legL.position.set(-0.16, 0.82, 0);
+  const legLMesh = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.78, 0.22), pantsMat);
+  legLMesh.position.y = -0.39;
+  legL.add(legLMesh);
+  const shoeL = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.1, 0.36), limbMaterial(0x111111));
+  shoeL.position.set(0, -0.78, 0.05);
+  legL.add(shoeL);
+  group.add(legL);
+  const legR = new THREE.Group();
+  legR.position.set(0.16, 0.82, 0);
+  const legRMesh = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.78, 0.22), pantsMat);
+  legRMesh.position.y = -0.39;
+  legR.add(legRMesh);
+  const shoeR = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.1, 0.36), limbMaterial(0x111111));
+  shoeR.position.set(0, -0.78, 0.05);
+  legR.add(shoeR);
+  group.add(legR);
+  if (o.gun) {
+    const gun = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.1, 0.42), limbMaterial(0x111111));
+    gun.position.set(0, -0.72, 0.2);
+    armR.add(gun);
+  }
   group.scale.setScalar(scale);
-  group.position.set(spot.x, 0, spot.z);
-  group.rotation.y = spot.heading;
-  state.scene.add(group);
-  const ped = {
-    group,
-    position: group.position,
-    heading: spot.heading,
-    speed: 0.9 + Math.random() * 0.9,
-    walkSpeed: 0.9 + Math.random() * 0.9,
-    state: 'walk',
-    targetX: spot.x,
-    targetZ: spot.z,
-    walkPhase: Math.random() * Math.PI * 2,
-    waitTimer: 0,
-    fleeTimer: 0,
-    panic: 0,
-    health: 100,
-    civilian: true,
-  };
-  return ped;
+  const parts = { armL, armR, legL, legR, head, torso };
+  return { group, parts };
 }
 
-export function createPedestrians(state, count) {
-  const total = count || pickNumber([CONFIG?.pedestrians?.count, CONFIG?.pedCount], 40);
-  const near = state.player?.position || { x: 0, z: 0 };
-  const peds = [];
-  for (let i = 0; i < total; i++) {
-    peds.push(spawnPed(state, near, 120));
-  }
-  state.peds = peds;
-  state.pedsApi = {
-    scarePeds: (st, x, z, radius) => scarePeds(st, x, z, radius),
+function randomSidewalkSpot(net) {
+  if (!net || !net.segments || net.segments.length === 0) return null;
+  const seg = net.segments[Math.floor(Math.random() * net.segments.length)];
+  const t = Math.random();
+  const x = seg.a.x + (seg.b.x - seg.a.x) * t;
+  const z = seg.a.z + (seg.b.z - seg.a.z) * t;
+  const dx = seg.b.x - seg.a.x;
+  const dz = seg.b.z - seg.a.z;
+  const len = Math.hypot(dx, dz) || 1;
+  const side = Math.random() < 0.5 ? 1 : -1;
+  return {
+    x: x - (dz / len) * 8.5 * side,
+    z: z + (dx / len) * 8.5 * side,
+    heading: Math.atan2(dx, dz) + (side > 0 ? 0 : Math.PI),
+    seg,
+    t,
+    dir: side > 0 ? 1 : -1,
   };
+}
+
+export function createPedestrians(state) {
+  const net = netOf(state);
+  if (!net) {
+    state._pedsPending = true;
+    return [];
+  }
+  state._pedsPending = false;
+  const scene = state.world.scene;
+  const peds = [];
+  const avenueSpots = [
+    { x: 110, z: 108.5, heading: -Math.PI / 2 },
+    { x: 85, z: 91.5, heading: Math.PI / 2 },
+    { x: 55, z: 108.5, heading: -Math.PI / 2 },
+    { x: 15, z: 91.5, heading: Math.PI / 2 },
+    { x: -25, z: 108.5, heading: -Math.PI / 2 },
+    { x: -55, z: 91.5, heading: Math.PI / 2 },
+  ];
+  const total = 26;
+  for (let i = 0; i < total; i++) {
+    let spot = null;
+    let avenue = false;
+    if (i < avenueSpots.length) {
+      spot = avenueSpots[i];
+      avenue = true;
+    } else {
+      spot = randomSidewalkSpot(net);
+      if (!spot) break;
+    }
+    const hatRoll = Math.random();
+    const hat = hatRoll < 0.18 ? 'cap' : hatRoll < 0.3 ? 'hijab' : null;
+    const built = buildPersonFigure({ hat, hatColor: SHIRTS[Math.floor(Math.random() * SHIRTS.length)] });
+    built.group.position.set(spot.x, 0, spot.z);
+    built.group.rotation.y = spot.heading;
+    scene.add(built.group);
+    peds.push({
+      group: built.group,
+      parts: built.parts,
+      position: built.group.position,
+      heading: spot.heading,
+      speed: 1.1 + Math.random() * 1.2,
+      walkPhase: Math.random() * 6,
+      seg: avenue ? null : spot.seg,
+      t: avenue ? 0 : spot.t,
+      dir: avenue ? (spot.heading === -Math.PI / 2 ? 1 : -1) : spot.dir,
+      avenue,
+      laneZ: avenue ? spot.z : 0,
+    });
+  }
+  state.pedestrians = peds;
   return peds;
 }
 
-export function scarePeds(state, x, z, radius) {
-  const peds = state.peds || [];
-  for (const ped of peds) {
-    const dx = ped.position.x - x;
-    const dz = ped.position.z - z;
-    const d = Math.hypot(dx, dz);
-    if (d < radius) {
-      ped.state = 'flee';
-      ped.fleeTimer = 2.5 + Math.random() * 2;
-      ped.panic = 1;
-      const away = Math.atan2(dx, dz);
-      ped.heading = away;
-    }
+export function ensurePedestrians(state) {
+  if (state._pedsPending && netOf(state)) {
+    return createPedestrians(state);
   }
-}
-
-function pickNewTarget(state, ped) {
-  const roads = roadList(state);
-  const road = roads[Math.floor(Math.random() * roads.length)];
-  const t = Math.random();
-  const x = road.ax + (road.bx - road.ax) * t;
-  const z = road.az + (road.bz - road.az) * t;
-  const heading = Math.atan2(road.bx - road.ax, road.bz - road.az);
-  const side = Math.random() < 0.5 ? 1 : -1;
-  const off = 5.6 + Math.random() * 1.4;
-  ped.targetX = x + Math.cos(heading) * off * side;
-  ped.targetZ = z - Math.sin(heading) * off * side;
-}
-
-function updatePedWalk(state, ped, dt) {
-  const dx = ped.targetX - ped.position.x;
-  const dz = ped.targetZ - ped.position.z;
-  const d = Math.hypot(dx, dz);
-  if (d < 1.2) {
-    if (ped.waitTimer > 0) {
-      ped.waitTimer -= dt;
-      ped.speed = 0;
-      return;
-    }
-    if (Math.random() < 0.12) {
-      ped.waitTimer = 1 + Math.random() * 3;
-      return;
-    }
-    pickNewTarget(state, ped);
-    return;
-  }
-  const wantHeading = Math.atan2(dx, dz);
-  let diff = wantHeading - ped.heading;
-  while (diff > Math.PI) diff -= Math.PI * 2;
-  while (diff < -Math.PI) diff += Math.PI * 2;
-  ped.heading += diff * Math.min(1, dt * 5);
-  ped.speed = ped.walkSpeed;
-  ped.position.x += Math.sin(ped.heading) * ped.speed * dt;
-  ped.position.z += Math.cos(ped.heading) * ped.speed * dt;
-  ped.walkPhase += dt * ped.speed * 3.4;
-}
-
-function updatePedFlee(state, ped, dt) {
-  ped.fleeTimer -= dt;
-  if (ped.fleeTimer <= 0) {
-    ped.state = 'walk';
-    ped.panic = 0;
-    pickNewTarget(state, ped);
-    return;
-  }
-  const runSpeed = 5.2;
-  ped.speed = runSpeed;
-  ped.position.x += Math.sin(ped.heading) * runSpeed * dt;
-  ped.position.z += Math.cos(ped.heading) * runSpeed * dt;
-  ped.walkPhase += dt * runSpeed * 3.4;
-  const player = state.player;
-  if (player) {
-    const dx = player.position.x - ped.position.x;
-    const dz = player.position.z - ped.position.z;
-    if (dx * dx + dz * dz < 9) {
-      ped.heading = Math.atan2(-dx, -dz);
-    }
-  }
+  return state.pedestrians || [];
 }
 
 export function updatePedestrians(state, dt) {
-  const peds = state.peds || [];
-  const player = state.player;
-  const near = player?.position || { x: 0, z: 0 };
-
-  for (const ped of peds) {
-    if (ped.health <= 0) continue;
-    if (ped.state === 'flee') {
-      updatePedFlee(state, ped, dt);
-    } else {
-      updatePedWalk(state, ped, dt);
+  const peds = state.pedestrians || [];
+  const net = netOf(state);
+  for (const p of peds) {
+    p.walkPhase += dt * 6;
+    const swing = Math.sin(p.walkPhase) * 0.55;
+    p.parts.legL.rotation.x = swing;
+    p.parts.legR.rotation.x = -swing;
+    p.parts.armL.rotation.x = -swing * 0.7;
+    p.parts.armR.rotation.x = swing * 0.7;
+    if (p.avenue) {
+      p.group.position.x += (p.dir > 0 ? -1 : 1) * p.speed * dt;
+      if (p.group.position.x < -140) p.group.position.x = 140;
+      if (p.group.position.x > 140) p.group.position.x = -140;
+      p.group.position.z = p.laneZ;
+      continue;
     }
-    ped.group.rotation.y = ped.heading;
-    const limbs = ped.group.userData.limbs;
-    if (limbs) {
-      const swing = ped.speed > 0.1 ? Math.sin(ped.walkPhase) * (ped.state === 'flee' ? 0.95 : 0.55) : 0;
-      limbs.legL.rotation.x = swing;
-      limbs.legR.rotation.x = -swing;
-      limbs.armL.rotation.x = -swing * 0.8;
-      limbs.armR.rotation.x = swing * 0.8;
-    }
-  }
-
-  const cars = state.cars || [];
-  for (const ped of peds) {
-    if (ped.state === 'flee' || ped.health <= 0) continue;
-    for (const car of cars) {
-      if (car.exploded) continue;
-      const dx = ped.position.x - car.position.x;
-      const dz = ped.position.z - car.position.z;
-      const d2 = dx * dx + dz * dz;
-      const fast = Math.abs(car.speed) > 9;
-      if (d2 < 30 && (fast || car.driver === 'player')) {
-        const along = dx * Math.sin(car.heading) + dz * Math.cos(car.heading);
-        if (along > -2 && along < 12) {
-          ped.state = 'flee';
-          ped.fleeTimer = 2 + Math.random() * 2;
-          ped.heading = Math.atan2(dx, dz);
-          break;
-        }
+    if (!p.seg || !net) continue;
+    const seg = p.seg;
+    const dx = seg.b.x - seg.a.x;
+    const dz = seg.b.z - seg.a.z;
+    const len = Math.hypot(dx, dz) || 1;
+    p.t += (p.speed * p.dir * dt) / len;
+    if (p.t > 1 || p.t < 0) {
+      const next = randomSidewalkSpot(net);
+      if (next) {
+        p.seg = next.seg;
+        p.t = next.t;
+        p.dir = next.dir;
+        p.heading = next.heading;
+        p.group.rotation.y = p.heading;
+      } else {
+        p.t = Math.max(0, Math.min(1, p.t));
       }
+      continue;
     }
-  }
-
-  if (player && player.car) {
-    for (const ped of peds) {
-      if (ped.health <= 0) continue;
-      const car = player.car;
-      const dx = ped.position.x - car.position.x;
-      const dz = ped.position.z - car.position.z;
-      if (dx * dx + dz * dz < 4.2 && Math.abs(car.speed) > 4) {
-        ped.health = 0;
-        ped.group.visible = false;
-        state.policeApi?.addHeat?.(state, 1);
-        state.stats = state.stats || {};
-        state.stats.takedowns = (state.stats.takedowns || 0) + 1;
-        state.combatApi?.addShake?.(state, 0.4);
-        scarePeds(state, ped.position.x, ped.position.z, 20);
-      }
-    }
-  }
-
-  for (const ped of peds) {
-    const d = Math.hypot(ped.position.x - near.x, ped.position.z - near.z);
-    if (d > 170 && ped.health > 0) {
-      const spot = randomSidewalkSpot(state, near, 120);
-      ped.position.set(spot.x, 0, spot.z);
-      ped.heading = spot.heading;
-      ped.group.rotation.y = spot.heading;
-      ped.state = 'walk';
-      ped.fleeTimer = 0;
-      ped.panic = 0;
-      pickNewTarget(state, ped);
-    }
+    const sdx = seg.b.x - seg.a.x;
+    const sdz = seg.b.z - seg.a.z;
+    const slen = Math.hypot(sdx, sdz) || 1;
+    const side = p.dir > 0 ? 1 : -1;
+    p.group.position.set(
+      seg.a.x + (sdx * p.t) - (sdz / slen) * 8.5 * side,
+      0,
+      seg.a.z + (sdz * p.t) + (sdx / slen) * 8.5 * side
+    );
+    p.heading = Math.atan2(sdx * p.dir, sdz * p.dir);
+    p.group.rotation.y = p.heading;
   }
 }
