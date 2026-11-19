@@ -208,7 +208,11 @@ async function main(): Promise<void> {
   const gameFileCount = gameEntries.filter((entry) => !entry.isDirectory).length;
   const gameBytes = gameEntries.reduce((sum, entry) => sum + entry.bytes, 0);
 
-  fs.rmSync(outDir, { recursive: true, force: true });
+  if (fs.existsSync(outDir)) {
+    for (const name of fs.readdirSync(outDir)) {
+      fs.rmSync(path.join(outDir, name), { recursive: true, force: true });
+    }
+  }
   fs.mkdirSync(path.join(outDir, "game"), { recursive: true });
   fs.mkdirSync(path.join(outDir, "screenshots"), { recursive: true });
   copyTree(gameEntries, path.join(outDir, "game"));
