@@ -1,272 +1,517 @@
-import 'three';
-const THREE = window.THREE;
+// vehicles.js — kendaraan Teluk Cerah: mobil sport, sedan, taksi, truk,
+// dan van dengan bodi membulat, kaca mengkilap, lampu menyala, dan roda
+// berpelek. Lalu lintas mengikuti jaringan jalan dan selalu ramai di
+// sekitar kamera.
+// Revisi 2: tiap mobil membawa kondisi (untuk HUD), cat lebih glossy,
+// diffuser belakang, dan tidak ada mesh tersembunyi.
+// Semua bentuk dibuat prosedural; tidak ada aset luar.
 
-const TRAFFIC_COLORS = [0xd8d8d8, 0xc23a3a, 0x3a6ad8, 0x2f9e44, 0xe8a33a, 0x8a5ad8, 0x22242c, 0xd8e8f2];
+let trafficCache = [];
 
-export function netOf(state) {
-  if (!state) return null;
-  if (state.network && state.network.segments) return state.network;
-  if (state.city && state.city.segments) return state.city;
-  if (state.roads && state.roads.segments) return state.roads;
-  if (state.roadNetwork && state.roadNetwork.segments) return state.roadNetwork;
-  if (state.world) {
-    if (state.world.network && state.world.network.segments) return state.world.network;
-    if (state.world.scene && state.world.scene.userData && state.world.scene.userData.network) return state.world.scene.userData.network;
+function rimTexture() {
+  const c = document.createElement('canvas');
+  c.width = 128;
+  c.height = 128;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#c8ccd4';
+  ctx.beginPath();
+  ctx.arc(64, 64, 62, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#2a2e35';
+  ctx.beginPath();
+  ctx.arc(64, 64, 30, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#8a909a';
+  ctx.lineWidth = 12;
+  for (let i = 0; i < 5; i++) {
+    const a = (i / 5) * Math.PI * 2;
+    ctx.beginPath();
+    ctx.moveTo(64 + Math.cos(a) * 28, 64 + Math.sin(a) * 28);
+    ctx.lineTo(64 + Math.cos(a) * 58, 64 + Math.sin(a) * 58);
+    ctx.stroke();
   }
-  return null;
+  ctx.fillStyle = '#e8ecf2';
+  ctx.beginPath();
+  ctx.arc(64, 64, 10, 0, Math.PI * 2);
+  ctx.fill();
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
 }
 
-function randomSegment(net) {
-  if (!net || !net.segments || net.segments.length === 0) return null;
-  return net.segments[Math.floor(Math.random() * net.segments.length)];
+function plateTexture(text) {
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 64;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#f2f2ea';
+  ctx.fillRect(0, 0, 256, 64);
+  ctx.strokeStyle = '#222';
+  ctx.lineWidth = 4;
+  ctx.strokeRect(3, 3, 250, 58);
+  ctx.fillStyle = '#16233a';
+  ctx.font = 'bold 38px Arial, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, 128, 34);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
 }
 
-function paintMaterial(color, kind) {
-  if (kind === 'sport') return new THREE.MeshLambertMaterial({ color });
-  return new THREE.MeshStandardMaterial({ color, roughness: 0.35, metalness: 0.45 });
+// profil samping mobil: kap melengkung, atap membulat, bagasi landai.
+function sideProfile(kind) {
+  const s = new THREE.Shape();
+  if (kind === 'sport') {
+    s.moveTo(-2.35, 0.32);
+    s.quadraticCurveTo(-2.35, 0.62, -1.9, 0.66);
+    s.quadraticCurveTo(-1.15, 0.72, -0.55, 0.78);
+    s.quadraticCurveTo(-0.15, 1.08, 0.35, 1.1);
+    s.quadraticCurveTo(0.95, 1.08, 1.35, 0.82);
+    s.quadraticCurveTo(1.95, 0.74, 2.3, 0.66);
+    s.quadraticCurveTo(2.42, 0.5, 2.35, 0.32);
+    s.quadraticCurveTo(1.2, 0.18, 0, 0.2);
+    s.quadraticCurveTo(-1.2, 0.18, -2.35, 0.32);
+  } else if (kind === 'truck') {
+    s.moveTo(-2.6, 0.3);
+    s.lineTo(-2.6, 1.5);
+    s.quadraticCurveTo(-2.6, 1.75, -2.3, 1.75);
+    s.lineTo(-0.7, 1.75);
+    s.lineTo(-0.7, 0.9);
+    s.lineTo(2.6, 0.9);
+    s.lineTo(2.6, 0.3);
+    s.quadraticCurveTo(0, 0.18, -2.6, 0.3);
+  } else if (kind === 'van') {
+    s.moveTo(-2.4, 0.3);
+    s.quadraticCurveTo(-2.4, 1.5, -1.9, 1.62);
+    s.quadraticCurveTo(-0.6, 1.78, 0.8, 1.72);
+    s.quadraticCurveTo(2.2, 1.66, 2.4, 1.1);
+    s.quadraticCurveTo(2.45, 0.5, 2.3, 0.3);
+    s.quadraticCurveTo(0, 0.18, -2.4, 0.3);
+  } else {
+    s.moveTo(-2.3, 0.32);
+    s.quadraticCurveTo(-2.3, 0.6, -1.85, 0.64);
+    s.quadraticCurveTo(-1.0, 0.7, -0.5, 0.76);
+    s.quadraticCurveTo(-0.1, 1.06, 0.4, 1.06);
+    s.quadraticCurveTo(0.95, 1.04, 1.3, 0.78);
+    s.quadraticCurveTo(1.95, 0.7, 2.3, 0.62);
+    s.quadraticCurveTo(2.42, 0.48, 2.32, 0.32);
+    s.quadraticCurveTo(1.1, 0.18, 0, 0.2);
+    s.quadraticCurveTo(-1.2, 0.18, -2.3, 0.32);
+  }
+  return s;
 }
 
-export function buildCarMesh(kind, color, opts) {
-  const group = new THREE.Group();
-  const paintMat = paintMaterial(color, kind);
-  const darkMat = new THREE.MeshLambertMaterial({ color: 0x16181e });
-  const glassMat = new THREE.MeshStandardMaterial({ color: 0x9fd8ff, roughness: 0.1, metalness: 0.7 });
-  const chromeMat = new THREE.MeshStandardMaterial({ color: 0xd8dde2, roughness: 0.2, metalness: 0.9 });
+function paintMaterial(color, rough = 0.22) {
+  return new THREE.MeshStandardMaterial({
+    color,
+    metalness: 0.68,
+    roughness: rough,
+    envMapIntensity: 1.9,
+  });
+}
 
-  const long = kind === 'sport' ? 4.6 : 4.4;
-  const wide = kind === 'sport' ? 2.0 : 1.9;
-  const body = new THREE.Mesh(new THREE.BoxGeometry(wide, 0.62, long), paintMat);
-  body.position.y = 0.55;
-  group.add(body);
-  const nose = new THREE.Mesh(new THREE.BoxGeometry(wide * 0.92, 0.4, 0.9), paintMat);
-  nose.position.set(0, 0.5, long / 2 - 0.3);
-  group.add(nose);
-  const cabin = new THREE.Mesh(new THREE.BoxGeometry(wide * 0.84, 0.55, long * 0.42), glassMat);
-  cabin.position.set(0, 1.05, -0.25);
-  group.add(cabin);
-  const roof = new THREE.Mesh(new THREE.BoxGeometry(wide * 0.8, 0.1, long * 0.4), paintMat);
-  roof.position.set(0, 1.35, -0.25);
-  group.add(roof);
-  const grill = new THREE.Mesh(new THREE.BoxGeometry(wide * 0.7, 0.22, 0.1), chromeMat);
-  grill.position.set(0, 0.5, long / 2 + 0.02);
-  group.add(grill);
+function glassMaterial() {
+  return new THREE.MeshStandardMaterial({
+    color: 0x141a22,
+    metalness: 0.9,
+    roughness: 0.07,
+    envMapIntensity: 2.6,
+  });
+}
 
-  const headMat = new THREE.MeshBasicMaterial({ color: 0xfff2c8 });
-  const hlL = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.18, 0.08), headMat);
-  hlL.position.set(-wide * 0.32, 0.62, long / 2 + 0.04);
-  group.add(hlL);
-  const hlR = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.18, 0.08), headMat);
-  hlR.position.set(wide * 0.32, 0.62, long / 2 + 0.04);
-  group.add(hlR);
-  const tailMat = new THREE.MeshBasicMaterial({ color: 0xff2233 });
-  const tlL = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.16, 0.08), tailMat);
-  tlL.position.set(-wide * 0.32, 0.62, -long / 2 - 0.04);
-  group.add(tlL);
-  const tlR = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.16, 0.08), tailMat);
-  tlR.position.set(wide * 0.32, 0.62, -long / 2 - 0.04);
-  group.add(tlR);
+function glowSprite(color, scale) {
+  const c = document.createElement('canvas');
+  c.width = 64;
+  c.height = 64;
+  const ctx = c.getContext('2d');
+  const g = ctx.createRadialGradient(32, 32, 2, 32, 32, 32);
+  g.addColorStop(0, color);
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 64, 64);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: tex, transparent: true, opacity: 0.85, depthWrite: false,
+  }));
+  sp.scale.set(scale, scale, 1);
+  return sp;
+}
 
-  const wheelGeo = new THREE.CylinderGeometry(0.38, 0.38, 0.3, 14);
-  const wheelMat = new THREE.MeshLambertMaterial({ color: 0x111111 });
+function makeWheel(rimTex, radius, width) {
+  const wheel = new THREE.Group();
+  const tire = new THREE.Mesh(
+    new THREE.CylinderGeometry(radius, radius, width, 20),
+    new THREE.MeshStandardMaterial({ color: 0x141414, roughness: 0.9 })
+  );
+  tire.rotation.z = Math.PI / 2;
+  tire.castShadow = true;
+  wheel.add(tire);
+  const rimMat = new THREE.MeshStandardMaterial({ map: rimTex, metalness: 0.7, roughness: 0.3 });
+  for (const side of [-1, 1]) {
+    const cap = new THREE.Mesh(new THREE.CircleGeometry(radius * 0.62, 20), rimMat);
+    cap.position.x = side * (width / 2 + 0.01);
+    cap.rotation.y = side * Math.PI / 2;
+    wheel.add(cap);
+  }
+  return wheel;
+}
+
+// Membangun satu mobil lengkap. Depan mobil menghadap -Z saat rotasi 0.
+export function buildCarMesh(kind, colorHex, opts = {}) {
+  const car = new THREE.Group();
+  const paint = paintMaterial(colorHex, kind === 'truck' ? 0.5 : 0.22);
+  const glass = glassMaterial();
+  const width = kind === 'truck' ? 2.3 : kind === 'van' ? 2.05 : 1.95;
+  const profile = sideProfile(kind);
+  const bodyGeo = new THREE.ExtrudeGeometry(profile, {
+    depth: width - 0.5,
+    bevelEnabled: true,
+    bevelThickness: 0.22,
+    bevelSize: 0.22,
+    bevelSegments: 3,
+    steps: 1,
+  });
+  bodyGeo.translate(0, 0, -(width - 0.5) / 2);
+  bodyGeo.rotateY(-Math.PI / 2);
+  const body = new THREE.Mesh(bodyGeo, paint);
+  body.castShadow = true;
+  body.receiveShadow = true;
+  car.add(body);
+
+  // kaca kabin: kubah gelap mengkilap yang mengikuti lekuk atap
+  if (kind !== 'truck') {
+    const cabin = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 14), glass);
+    const cl = kind === 'sport' ? 1.55 : 1.35;
+    cabin.scale.set(0.82, 0.52, cl);
+    cabin.position.set(0, kind === 'sport' ? 0.92 : 0.95, 0.15);
+    car.add(cabin);
+    const shield = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 10), glass);
+    shield.scale.set(0.8, 0.3, 0.5);
+    shield.position.set(0, 0.98, -1.05);
+    car.add(shield);
+  } else {
+    const cabGlass = new THREE.Mesh(
+      new THREE.BoxGeometry(1.9, 0.7, 0.1),
+      glass
+    );
+    cabGlass.position.set(0, 1.35, -1.72);
+    cabGlass.rotation.x = -0.12;
+    car.add(cabGlass);
+    const bed = new THREE.Mesh(
+      new THREE.BoxGeometry(2.1, 0.5, 2.6),
+      new THREE.MeshStandardMaterial({ color: 0x5a5148, roughness: 0.8, metalness: 0.3 })
+    );
+    bed.position.set(0, 1.05, 1.2);
+    car.add(bed);
+  }
+
+  // lampu belakang: pita merah menyala memanjang
+  const tailMat = new THREE.MeshStandardMaterial({
+    color: 0x8a0f14, emissive: 0xff1a22, emissiveIntensity: 1.8, roughness: 0.3,
+  });
+  const tailBar = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, width * 0.72, 10), tailMat);
+  tailBar.rotation.z = Math.PI / 2;
+  tailBar.position.set(0, 0.62, kind === 'sport' ? 2.32 : 2.28);
+  car.add(tailBar);
+  for (const s of [-1, 1]) {
+    const glow = glowSprite('rgba(255,40,50,0.9)', 1.1);
+    glow.position.set(s * width * 0.32, 0.62, 2.42);
+    car.add(glow);
+  }
+  // diffuser belakang + knalpot
+  const diffuser = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.16, 0.2, width * 0.7, 10),
+    new THREE.MeshStandardMaterial({ color: 0x1a1a1e, roughness: 0.5, metalness: 0.6 })
+  );
+  diffuser.rotation.z = Math.PI / 2;
+  diffuser.position.set(0, 0.3, 2.3);
+  car.add(diffuser);
+  for (const s of [-1, 1]) {
+    const pipe = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.07, 0.07, 0.22, 10),
+      new THREE.MeshStandardMaterial({ color: 0xb8bec8, metalness: 0.9, roughness: 0.25 })
+    );
+    pipe.rotation.x = Math.PI / 2;
+    pipe.position.set(s * 0.55, 0.3, 2.38);
+    car.add(pipe);
+  }
+  // lampu depan hangat
+  const headMat = new THREE.MeshStandardMaterial({
+    color: 0xfff2c0, emissive: 0xffe9a0, emissiveIntensity: 2.2, roughness: 0.2,
+  });
+  for (const s of [-1, 1]) {
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.14, 10, 8), headMat);
+    head.scale.set(1.4, 0.7, 0.7);
+    head.position.set(s * 0.62, 0.6, -2.32);
+    car.add(head);
+    const glow = glowSprite('rgba(255,230,160,0.8)', 1.3);
+    glow.position.set(s * 0.62, 0.6, -2.45);
+    car.add(glow);
+  }
+
+  // spoiler melengkung untuk sport
+  if (kind === 'sport') {
+    const wingShape = new THREE.Shape();
+    wingShape.moveTo(-0.55, 0);
+    wingShape.quadraticCurveTo(0, 0.16, 0.55, 0);
+    wingShape.lineTo(0.45, -0.12);
+    wingShape.quadraticCurveTo(0, -0.02, -0.45, -0.12);
+    wingShape.closePath();
+    const wingGeo = new THREE.ExtrudeGeometry(wingShape, {
+      depth: width * 0.85, bevelEnabled: true, bevelThickness: 0.04, bevelSize: 0.04, bevelSegments: 2,
+    });
+    wingGeo.translate(0, 0, -(width * 0.85) / 2);
+    wingGeo.rotateY(Math.PI / 2);
+    const wing = new THREE.Mesh(wingGeo, paint);
+    wing.position.set(0, 1.02, 2.28);
+    wing.rotation.x = -0.1;
+    wing.castShadow = true;
+    car.add(wing);
+    for (const s of [-1, 1]) {
+      const strut = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.05, 0.05, 0.3, 6),
+        new THREE.MeshStandardMaterial({ color: 0x1a1a1e, roughness: 0.5, metalness: 0.6 })
+      );
+      strut.position.set(s * 0.6, 0.88, 2.28);
+      car.add(strut);
+    }
+  }
+
+  // plat nomor
+  const plate = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.72, 0.18),
+    new THREE.MeshStandardMaterial({ map: plateTexture(opts.plate || 'TC 4821'), roughness: 0.4 })
+  );
+  plate.position.set(0, 0.42, 2.44);
+  car.add(plate);
+
+  // roda dengan pelek
+  const rimTex = rimTexture();
+  const radius = kind === 'truck' ? 0.48 : 0.38;
+  const wHalf = width / 2;
   const wheels = [];
   const wheelPos = [
-    [-wide / 2 + 0.05, 0.38, long / 2 - 0.9],
-    [wide / 2 - 0.05, 0.38, long / 2 - 0.9],
-    [-wide / 2 + 0.05, 0.38, -long / 2 + 0.9],
-    [wide / 2 - 0.05, 0.38, -long / 2 + 0.9],
+    [-wHalf - 0.02, 0.42, -1.55],
+    [wHalf + 0.02, 0.42, -1.55],
+    [-wHalf - 0.02, 0.42, 1.55],
+    [wHalf + 0.02, 0.42, 1.55],
   ];
-  for (const p of wheelPos) {
-    const w = new THREE.Mesh(wheelGeo, wheelMat);
-    w.rotation.z = Math.PI / 2;
-    w.position.set(p[0], p[1], p[2]);
-    group.add(w);
-    wheels.push(w);
+  for (const [x, y, z] of wheelPos) {
+    const wheel = makeWheel(rimTex, radius, 0.3);
+    wheel.position.set(x, y, z);
+    car.add(wheel);
+    wheels.push(wheel);
   }
 
-  let barL = null;
-  let barR = null;
-  let poolL = null;
-  let poolR = null;
-  if (kind === 'police') {
-    const barGeo = new THREE.BoxGeometry(0.55, 0.18, 0.3);
-    barL = new THREE.Mesh(barGeo, new THREE.MeshBasicMaterial({ color: 0xff2233 }));
-    barL.position.set(-0.32, 1.48, -0.25);
-    group.add(barL);
-    barR = new THREE.Mesh(barGeo, new THREE.MeshBasicMaterial({ color: 0x2266ff }));
-    barR.position.set(0.32, 1.48, -0.25);
-    group.add(barR);
-    const stripe = new THREE.Mesh(new THREE.BoxGeometry(wide + 0.02, 0.3, long * 0.9), new THREE.MeshLambertMaterial({ color: 0x1a3a8a }));
-    stripe.position.y = 0.62;
-    group.add(stripe);
-    const poolGeo = new THREE.CircleGeometry(2.2, 18);
-    poolL = new THREE.Mesh(poolGeo, new THREE.MeshBasicMaterial({ color: 0xff2233, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending, depthWrite: false }));
-    poolL.rotation.x = -Math.PI / 2;
-    poolL.position.y = 0.07;
-    group.add(poolL);
-    poolR = new THREE.Mesh(poolGeo, new THREE.MeshBasicMaterial({ color: 0x2266ff, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending, depthWrite: false }));
-    poolR.rotation.x = -Math.PI / 2;
-    poolR.position.y = 0.08;
-    group.add(poolR);
-    const badge = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.5, 0.06), new THREE.MeshBasicMaterial({ color: 0xffe14d }));
-    badge.position.set(0, 0.62, long / 2 + 0.06);
-    group.add(badge);
-  }
-  if (kind === 'sport') {
-    const spoiler = new THREE.Mesh(new THREE.BoxGeometry(wide * 0.9, 0.08, 0.5), paintMat);
-    spoiler.position.set(0, 1.05, -long / 2 + 0.2);
-    group.add(spoiler);
-    const skirt = new THREE.Mesh(new THREE.BoxGeometry(wide + 0.06, 0.18, long * 0.8), chromeMat);
-    skirt.position.y = 0.28;
-    group.add(skirt);
-  }
-  return { group, wheels, paintMat, barL, barR, poolL, poolR };
-}
-
-export function spawnCar(state, kind, color, spot) {
-  const scene = state.world.scene;
-  const built = buildCarMesh(kind, color, {});
-  const car = {
-    group: built.group,
-    kind,
-    speed: 0,
-    maxSpeed: kind === 'sport' ? 40 : kind === 'police' ? 24 : 16,
-    heading: 0,
-    angle: 0,
-    health: 100,
-    condition: 88,
-    driver: null,
-    parked: true,
-    wheels: built.wheels,
-    paintMat: built.paintMat,
-    barL: built.barL,
-    barR: built.barR,
-    poolL: built.poolL,
-    poolR: built.poolR,
-    position: built.group.position,
-  };
-  const x = spot && spot.x !== undefined ? spot.x : 40;
-  const z = spot && spot.z !== undefined ? spot.z : 100;
-  car.group.position.set(x, 0, z);
-  scene.add(car.group);
-  if (!state.cars) state.cars = [];
-  state.cars.push(car);
+  car.userData.wheels = wheels;
+  car.userData.kind = kind;
+  car.userData.paint = paint;
+  car.userData.condition = typeof opts.condition === 'number' ? opts.condition : 100;
   return car;
 }
 
-export function createTraffic(state) {
-  const net = netOf(state);
-  if (!net) {
-    state._trafficPending = true;
-    return [];
-  }
-  state._trafficPending = false;
-  const scene = state.world.scene;
-  const traffic = [];
-  const count = 16;
-  for (let i = 0; i < count; i++) {
-    let seg = null;
-    let t = Math.random();
-    let dir = Math.random() < 0.5 ? 1 : -1;
-    if (i < 5) {
-      const avenue = net.segments.filter((s) => Math.abs(s.a.z - 100) < 1 && Math.abs(s.b.z - 100) < 1);
-      seg = avenue.length ? avenue[Math.floor(Math.random() * avenue.length)] : randomSegment(net);
-      if (seg && Math.abs(seg.a.z - 100) < 1) {
-        const wantX = 20 - i * 32;
-        const dx0 = seg.b.x - seg.a.x;
-        t = dx0 !== 0 ? (wantX - seg.a.x) / dx0 : 0.5;
-        t = Math.max(0.05, Math.min(0.95, t));
-        dir = seg.b.x > seg.a.x ? -1 : 1;
-      }
-    } else {
-      seg = randomSegment(net);
-    }
-    if (!seg) break;
-    const color = TRAFFIC_COLORS[i % TRAFFIC_COLORS.length];
-    const built = buildCarMesh('sedan', color, {});
-    const car = {
-      group: built.group,
-      kind: 'traffic',
-      speed: 8 + Math.random() * 6,
-      maxSpeed: 16,
-      heading: 0,
-      angle: 0,
-      health: 100,
-      condition: 80,
-      driver: null,
-      parked: false,
-      wheels: built.wheels,
-      paintMat: built.paintMat,
-      barL: null,
-      barR: null,
-      poolL: null,
-      poolR: null,
-      position: built.group.position,
-      seg,
-      t,
-      dir,
-      lane: (Math.random() - 0.5) * 5,
-    };
-    const dx = seg.b.x - seg.a.x;
-    const dz = seg.b.z - seg.a.z;
-    const len = Math.hypot(dx, dz) || 1;
-    car.heading = Math.atan2(dx * car.dir, dz * car.dir);
-    car.group.rotation.y = car.heading;
-    car.group.position.set(
-      seg.a.x + (dx * car.t) - (dz / len) * car.lane,
-      0,
-      seg.a.z + (dz * car.t) + (dx / len) * car.lane
-    );
-    scene.add(car.group);
-    traffic.push(car);
-  }
-  state.traffic = traffic;
-  return traffic;
+const TRAFFIC_COLORS = {
+  sedan: [0x3a6ac2, 0xc23a3a, 0x3a3a44, 0xd8d8d8, 0x2a8a5a],
+  taxi: [0xf2c200],
+  truck: [0x8a6a3a, 0x5a7a8a, 0x7a5a5a],
+  van: [0xd8d8d8, 0x4a6a8a, 0x8a8a7a],
+  sport: [0xff4fa3, 0xff2a3a, 0x2a9aff, 0xffd23e],
+};
+
+function resolveNetwork(state) {
+  const net = state.roads || state.network || state.city || state.world?.roads || state.world?.city || null;
+  if (!net) return null;
+  const segs = net.segments || net.roads || (Array.isArray(net) ? net : null);
+  if (!segs || !segs.length) return null;
+  return segs.map((s) => {
+    const a = s.a || s.start || s.from;
+    const b = s.b || s.end || s.to;
+    if (!a || !b) return null;
+    return { a, b };
+  }).filter(Boolean);
 }
 
-export function ensureTraffic(state) {
-  if (state._trafficPending && netOf(state)) {
-    return createTraffic(state);
+function segmentDirection(seg) {
+  const dx = seg.b.x - seg.a.x;
+  const dz = seg.b.z - seg.a.z;
+  const len = Math.hypot(dx, dz) || 1;
+  return { x: dx / len, z: dz / len, len };
+}
+
+export function createTraffic(state, count) {
+  const world = state.world || state.scene || null;
+  const scene = world?.scene || world;
+  const segs = resolveNetwork(state) || [];
+  const cars = [];
+  const kinds = ['sedan', 'sedan', 'taxi', 'van', 'sport', 'truck'];
+  const n = count || 14;
+  for (let i = 0; i < n; i++) {
+    const kind = kinds[i % kinds.length];
+    const cols = TRAFFIC_COLORS[kind];
+    const color = cols[Math.floor(Math.random() * cols.length)];
+    const mesh = buildCarMesh(kind, color, { plate: 'TC ' + (1000 + Math.floor(Math.random() * 9000)) });
+    let seg = segs.length ? segs[Math.floor(Math.random() * segs.length)] : null;
+    let prog = Math.random();
+    let x = 0;
+    let z = 0;
+    let heading = 0;
+    if (seg) {
+      const d = segmentDirection(seg);
+      x = seg.a.x + d.x * prog * d.len;
+      z = seg.a.z + d.z * prog * d.len;
+      heading = Math.atan2(-d.x, -d.z);
+    } else {
+      x = (Math.random() - 0.5) * 220;
+      z = (Math.random() - 0.5) * 220;
+      heading = Math.random() * Math.PI * 2;
+    }
+    mesh.position.set(x, 0, z);
+    mesh.rotation.y = heading;
+    if (scene && scene.add) scene.add(mesh);
+    const car = {
+      group: mesh,
+      mesh,
+      position: mesh.position,
+      heading,
+      angle: heading,
+      speed: 6 + Math.random() * 7,
+      velocity: { x: 0, z: 0 },
+      type: kind,
+      kind,
+      color,
+      condition: 100,
+      health: 100,
+      seg,
+      prog,
+      wheels: mesh.userData.wheels,
+    };
+    cars.push(car);
   }
-  return state.traffic || [];
+  trafficCache = cars;
+  return cars;
+}
+
+function playerPosition(state) {
+  const p = state.player || state.pemain;
+  if (!p) return null;
+  const holder = p.car || p.vehicle || p.currentCar || p;
+  const pos = holder.position || holder.group?.position || null;
+  return pos;
+}
+
+function nearSegment(segs, point, exclude) {
+  let best = null;
+  let bestD = 1e9;
+  for (const s of segs) {
+    if (s === exclude) continue;
+    const mx = (s.a.x + s.b.x) / 2;
+    const mz = (s.a.z + s.b.z) / 2;
+    const d = Math.hypot(mx - point.x, mz - point.z);
+    if (d < bestD) {
+      bestD = d;
+      best = s;
+    }
+  }
+  return best;
 }
 
 export function updateTraffic(state, dt) {
-  const traffic = state.traffic || [];
-  const net = netOf(state);
-  for (const car of traffic) {
-    if (!car.seg || !net) continue;
-    const seg = car.seg;
-    const dx = seg.b.x - seg.a.x;
-    const dz = seg.b.z - seg.a.z;
-    const len = Math.hypot(dx, dz) || 1;
-    car.t += (car.speed * car.dir * dt) / len;
-    if (car.t > 1 || car.t < 0) {
-      let next = null;
-      if (Math.abs(seg.a.z - 100) < 1 && Math.abs(seg.b.z - 100) < 1) {
-        const avenue = net.segments.filter((s) => Math.abs(s.a.z - 100) < 1 && Math.abs(s.b.z - 100) < 1);
-        if (avenue.length) next = avenue[Math.floor(Math.random() * avenue.length)];
-      }
-      if (!next) next = randomSegment(net);
-      if (next) {
-        car.seg = next;
-        car.t = car.dir > 0 ? 0 : 1;
-        const ndx = next.b.x - next.a.x;
-        const ndz = next.b.z - next.a.z;
-        car.heading = Math.atan2(ndx * car.dir, ndz * car.dir);
-      } else {
-        car.t = Math.max(0, Math.min(1, car.t));
+  const cars = state.cars || state.traffic || state.vehicles || trafficCache;
+  if (!cars || !cars.length) return;
+  const segs = resolveNetwork(state) || [];
+  const pp = playerPosition(state);
+  const step = Math.min(dt, 0.05);
+  const p = state.player || state.pemain || null;
+  const playerCar = p ? (p.car || p.vehicle || p.currentCar || null) : null;
+  const playerGroup = playerCar ? (playerCar.group || playerCar.mesh || playerCar) : null;
+  for (const car of cars) {
+    if (!car.group) continue;
+    // Mobil yang dikendarai pemain dikendalikan updatePlayer, bukan
+    // lalu lintas: jangan dipindah, diputar, atau di-teleport.
+    if (playerCar && (car === playerCar || car.group === playerGroup)) continue;
+    if (pp && segs.length) {
+      const d = Math.hypot(car.position.x - pp.x, car.position.z - pp.z);
+      if (d > 130) {
+        const near = nearSegment(segs, pp, car.seg);
+        if (near) {
+          car.seg = near;
+          car.prog = 0;
+          car.position.set(near.a.x, 0, near.a.z);
+        }
       }
     }
-    const s2 = car.seg;
-    const sdx = s2.b.x - s2.a.x;
-    const sdz = s2.b.z - s2.a.z;
-    const slen = Math.hypot(sdx, sdz) || 1;
-    car.group.position.set(
-      s2.a.x + (sdx * car.t) - (sdz / slen) * car.lane,
-      0,
-      s2.a.z + (sdz * car.t) + (sdx / slen) * car.lane
-    );
+    if (car.seg) {
+      const d = segmentDirection(car.seg);
+      car.prog += (car.speed * step) / d.len;
+      if (car.prog >= 1) {
+        let next = null;
+        if (segs.length) {
+          const ends = segs.filter((s) => Math.hypot(s.a.x - car.seg.b.x, s.a.z - car.seg.b.z) < 3);
+          if (ends.length) next = ends[Math.floor(Math.random() * ends.length)];
+          else next = segs[Math.floor(Math.random() * segs.length)];
+        }
+        car.seg = next;
+        car.prog = 0;
+        if (next) {
+          car.position.set(next.a.x, 0, next.a.z);
+        }
+      } else {
+        const nx = car.seg.a.x + d.x * car.prog * d.len;
+        const nz = car.seg.a.z + d.z * car.prog * d.len;
+        const targetHeading = Math.atan2(-d.x, -d.z);
+        let diff = targetHeading - car.heading;
+        while (diff > Math.PI) diff -= Math.PI * 2;
+        while (diff < -Math.PI) diff += Math.PI * 2;
+        car.heading += diff * Math.min(1, step * 4);
+        car.angle = car.heading;
+        car.position.set(nx, 0, nz);
+        car.velocity.x = d.x * car.speed;
+        car.velocity.z = d.z * car.speed;
+      }
+    } else {
+      car.heading += Math.sin(performance.now() * 0.0001 + car.speed) * step * 0.1;
+      car.position.x += -Math.sin(car.heading) * car.speed * step;
+      car.position.z += -Math.cos(car.heading) * car.speed * step;
+      car.velocity.x = -Math.sin(car.heading) * car.speed;
+      car.velocity.z = -Math.cos(car.heading) * car.speed;
+    }
     car.group.rotation.y = car.heading;
-    for (const w of car.wheels || []) w.rotation.x += (car.speed * dt) / 0.4;
+    if (car.wheels) {
+      const spin = (car.speed * step) / 0.38;
+      for (const w of car.wheels) w.rotation.x += spin;
+    }
   }
+}
+
+export function nearestCar(state, point, maxDist) {
+  const cars = state.cars || state.traffic || state.vehicles || trafficCache;
+  if (!cars || !cars.length || !point) return null;
+  let best = null;
+  let bestD = maxDist || 6;
+  for (const car of cars) {
+    if (!car.position) continue;
+    const d = Math.hypot(car.position.x - point.x, car.position.z - point.z);
+    if (d < bestD) {
+      bestD = d;
+      best = car;
+    }
+  }
+  return best;
+}
+
+// Memastikan lalu lintas ada (dipakai staging/shot): bila belum ada,
+// bangkitkan; bila sudah ada, kembalikan apa adanya.
+export function ensureTraffic(state, count) {
+  const existing = state.cars || state.traffic || state.vehicles || trafficCache;
+  if (existing && existing.length) {
+    state.cars = existing;
+    state.traffic = existing;
+    return existing;
+  }
+  const made = createTraffic(state, count || 14);
+  state.cars = made;
+  state.traffic = made;
+  return made;
 }
