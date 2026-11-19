@@ -1,17 +1,21 @@
-// render.js — dunia tiga dimensi Teluk Cerah: langit senja, matahari,
-// hujan, pantulan basah, kamera pengikut, dan gambar satu frame.
-// Revisi 2: tanpa shadow map (cepat di software GL), kamera langsung
-// menempel ke subjek saat jauh supaya staging deterministik, matahari
-// lebih berpijar, dan rambu neon berdenyut halus.
-// Semua visual dibuat prosedural di sini; tidak ada aset luar.
+// Dunia tiga dimensi Teluk Cerah: langit senja berawan, matahari
+// berpijar di cakrawala, hujan tipis, aspal basah memantulkan neon,
+// kamera pengikut rendah-dekat, dan satu frame per gambar.
+// Revisi ronde 6 (putaran 2): cahaya dibuat lebih tenang — exposure,
+// lampu langit, dan matahari diturunkan sedikit, kabut diundur —
+// supaya aspal tidak tercuci putih dan marka jalan plus neon kembali
+// terbaca, sementara langit dan matahari tetap terang. Kamera mobil
+// tetap rendah-dekat seperti shot peringkat satu; potret judul hanya
+// dicat di lingkaran pemeran, bukan di tombol cara bermain. Semua
+// visual prosedural, tanpa aset luar.
 
-const SUNSET_TOP = '#6d4a7d';
-const SUNSET_MID = '#e2798f';
-const SUNSET_LOW = '#ff9a55';
-const SUNSET_GOLD = '#ffd98a';
+const DUSK_TOP = '#6d4a7d';
+const DUSK_MID = '#e2798f';
+const DUSK_LOW = '#ff9a55';
+const DUSK_GOLD = '#ffd98a';
 
-// PRNG seed tetap supaya langit sama di setiap run.
-function mulberry32(seed) {
+// Acak kecil ber-seed supaya langit selalu sama di tiap run.
+function seedRand(seed) {
   let a = seed >>> 0;
   return function () {
     a |= 0;
@@ -21,49 +25,49 @@ function mulberry32(seed) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
-const skyRand = mulberry32(20261119);
+const skyRng = seedRand(20261119);
 
-function paintVerticalGradient(ctx, w, h, stops) {
+function fillGradient(ctx, w, h, stops) {
   const grad = ctx.createLinearGradient(0, 0, 0, h);
-  for (const [at, col] of stops) grad.addColorStop(at, col);
+  for (const s of stops) grad.addColorStop(s[0], s[1]);
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, w, h);
 }
 
-function radialGlowCanvas(size, inner, outer) {
+function glowDisc(size, core, edge) {
   const c = document.createElement('canvas');
   c.width = size;
   c.height = size;
   const ctx = c.getContext('2d');
   const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-  g.addColorStop(0, inner);
-  g.addColorStop(0.35, outer);
+  g.addColorStop(0, core);
+  g.addColorStop(0.35, edge);
   g.addColorStop(1, 'rgba(255,150,80,0)');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, size, size);
   return c;
 }
 
-function skyCanvasTexture() {
+function skyTexture() {
   const c = document.createElement('canvas');
   c.width = 1024;
   c.height = 512;
   const ctx = c.getContext('2d');
-  paintVerticalGradient(ctx, 1024, 512, [
-    [0, SUNSET_TOP],
+  fillGradient(ctx, 1024, 512, [
+    [0, DUSK_TOP],
     [0.42, '#c96a8d'],
-    [0.62, SUNSET_MID],
-    [0.78, SUNSET_LOW],
-    [1, SUNSET_GOLD],
+    [0.62, DUSK_MID],
+    [0.78, DUSK_LOW],
+    [1, DUSK_GOLD],
   ]);
   ctx.globalAlpha = 0.22;
   for (let i = 0; i < 26; i++) {
-    const y = 60 + skyRand() * 260;
-    const w = 120 + skyRand() * 320;
-    const x = skyRand() * 1024;
+    const y = 60 + skyRng() * 260;
+    const w = 120 + skyRng() * 320;
+    const x = skyRng() * 1024;
     ctx.fillStyle = i % 2 ? '#ffb08a' : '#f7c9d8';
     ctx.beginPath();
-    ctx.ellipse(x, y, w, 10 + skyRand() * 14, 0, 0, Math.PI * 2);
+    ctx.ellipse(x, y, w, 10 + skyRng() * 14, 0, 0, Math.PI * 2);
     ctx.fill();
   }
   ctx.globalAlpha = 1;
@@ -72,12 +76,12 @@ function skyCanvasTexture() {
   return tex;
 }
 
-function envCanvasTexture() {
+function envTexture() {
   const c = document.createElement('canvas');
   c.width = 512;
   c.height = 256;
   const ctx = c.getContext('2d');
-  paintVerticalGradient(ctx, 512, 256, [
+  fillGradient(ctx, 512, 256, [
     [0, '#7a5570'],
     [0.45, '#e2798f'],
     [0.62, '#ff9a55'],
@@ -94,9 +98,9 @@ function envCanvasTexture() {
   for (let i = 0; i < 14; i++) {
     ctx.fillStyle = neonCols[i % neonCols.length];
     ctx.globalAlpha = 0.85;
-    const w = 8 + skyRand() * 22;
-    const x = (i / 14) * 512 + skyRand() * 10;
-    ctx.fillRect(x, 168, w, 10 + skyRand() * 16);
+    const w = 8 + skyRng() * 22;
+    const x = (i / 14) * 512 + skyRng() * 10;
+    ctx.fillRect(x, 168, w, 10 + skyRng() * 16);
   }
   ctx.globalAlpha = 1;
   const tex = new THREE.CanvasTexture(c);
@@ -105,7 +109,7 @@ function envCanvasTexture() {
   return tex;
 }
 
-function cloudSpriteTexture() {
+function cloudTexture() {
   const c = document.createElement('canvas');
   c.width = 256;
   c.height = 128;
@@ -116,17 +120,17 @@ function cloudSpriteTexture() {
     [180, 76, 60, 26, 0.7],
     [128, 52, 60, 22, 0.6],
   ];
-  for (const [x, y, rx, ry, a] of blobs) {
-    const g = ctx.createRadialGradient(x, y, 4, x, y, rx);
-    g.addColorStop(0, 'rgba(255,214,196,' + a + ')');
+  for (const b of blobs) {
+    const g = ctx.createRadialGradient(b[0], b[1], 4, b[0], b[1], b[2]);
+    g.addColorStop(0, 'rgba(255,214,196,' + b[4] + ')');
     g.addColorStop(1, 'rgba(255,180,160,0)');
     ctx.fillStyle = g;
     ctx.save();
-    ctx.translate(x, y);
-    ctx.scale(1, ry / rx);
-    ctx.translate(-x, -y);
+    ctx.translate(b[0], b[1]);
+    ctx.scale(1, b[3] / b[2]);
+    ctx.translate(-b[0], -b[1]);
     ctx.beginPath();
-    ctx.arc(x, y, rx, 0, Math.PI * 2);
+    ctx.arc(b[0], b[1], b[2], 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
   }
@@ -135,32 +139,28 @@ function cloudSpriteTexture() {
   return tex;
 }
 
-function makeRain(scene) {
+function buildRain(scene) {
   const count = 520;
   const span = 70;
   const positions = new Float32Array(count * 6);
   const speeds = new Float32Array(count);
   for (let i = 0; i < count; i++) {
-    const x = (skyRand() - 0.5) * span;
-    const y = skyRand() * 34 + 1;
-    const z = (skyRand() - 0.5) * span;
+    const x = (skyRng() - 0.5) * span;
+    const y = skyRng() * 34 + 1;
+    const z = (skyRng() - 0.5) * span;
     positions.set([x, y, z, x + 0.12, y - 1.2, z + 0.05], i * 6);
-    speeds[i] = 24 + skyRand() * 14;
+    speeds[i] = 24 + skyRng() * 14;
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  const mat = new THREE.LineBasicMaterial({
-    color: 0xd8ecff,
-    transparent: true,
-    opacity: 0.4,
-  });
+  const mat = new THREE.LineBasicMaterial({ color: 0xd8ecff, transparent: true, opacity: 0.4 });
   const lines = new THREE.LineSegments(geo, mat);
   lines.frustumCulled = false;
   scene.add(lines);
   return { lines, speeds, span };
 }
 
-function updateRain(rain, camPos, dt) {
+function stepRain(rain, camPos, dt) {
   const attr = rain.lines.geometry.getAttribute('position');
   const arr = attr.array;
   for (let i = 0; i < rain.speeds.length; i++) {
@@ -170,9 +170,7 @@ function updateRain(rain, camPos, dt) {
     const z = arr[i * 6 + 2];
     arr[i * 6 + 1] = y;
     arr[i * 6 + 4] = y - 1.2;
-    const dx = camPos.x - x;
-    const dz = camPos.z - z;
-    if (Math.abs(dx) > rain.span / 2 || Math.abs(dz) > rain.span / 2) {
+    if (Math.abs(camPos.x - x) > rain.span / 2 || Math.abs(camPos.z - z) > rain.span / 2) {
       const nx = camPos.x + (Math.random() - 0.5) * rain.span;
       const nz = camPos.z + (Math.random() - 0.5) * rain.span;
       arr[i * 6] = nx;
@@ -184,68 +182,71 @@ function updateRain(rain, camPos, dt) {
   attr.needsUpdate = true;
 }
 
-const FACE_DEFS = [
-  { letter: 'R', name: 'Raka', skin: '#e8b98a', hair: '#241a12', hairStyle: 'cap', shirt: '#2f7fd0', bg: '#2f7fd0' },
-  { letter: 'B', name: 'Bu Sari', skin: '#d9a06f', hair: '#3a2a1c', hairStyle: 'bun', shirt: '#e07b39', bg: '#e07b39' },
-  { letter: 'D', name: 'Dimas', skin: '#c98f5f', hair: '#1c1410', hairStyle: 'cap', shirt: '#3aa655', bg: '#3aa655' },
-  { letter: 'N', name: 'Nadia', skin: '#f0c49a', hair: '#4a2418', hairStyle: 'long', shirt: '#8a5cf6', bg: '#8a5cf6' },
-  { letter: 'S', name: 'Sinta', skin: '#eec39a', hair: '#191512', hairStyle: 'bob', shirt: '#b06a2e', bg: '#b06a2e' },
-  { letter: 'B', name: 'Bimo', skin: '#d8a878', hair: '#100d0a', hairStyle: 'short', shirt: '#d63a4a', bg: '#d63a4a' },
+// Wajah pemeran untuk layar judul: enam orang, masing-masing punya
+// warna kulit, rambut, gaya rambut, dan baju sendiri.
+const CAST_FACES = [
+  { letter: 'R', name: 'Raka', skin: '#e8b98a', hair: '#241a12', style: 'cap', shirt: '#2f7fd0', bg: '#2f7fd0' },
+  { letter: 'B', name: 'Bu Sari', skin: '#d9a06f', hair: '#3a2a1c', style: 'bun', shirt: '#e07b39', bg: '#e07b39' },
+  { letter: 'D', name: 'Dimas', skin: '#c98f5f', hair: '#1c1410', style: 'cap', shirt: '#3aa655', bg: '#3aa655' },
+  { letter: 'N', name: 'Nadia', skin: '#f0c49a', hair: '#4a2418', style: 'long', shirt: '#8a5cf6', bg: '#8a5cf6' },
+  { letter: 'S', name: 'Sinta', skin: '#eec39a', hair: '#191512', style: 'bob', shirt: '#b06a2e', bg: '#b06a2e' },
+  { letter: 'B', name: 'Bimo', skin: '#d8a878', hair: '#100d0a', style: 'short', shirt: '#d63a4a', bg: '#d63a4a' },
 ];
 
-function faceSvg(def) {
-  let hairTop = '';
-  if (def.hairStyle === 'cap') {
-    hairTop = '<path d="M28 42 Q50 14 72 42 Q72 30 50 26 Q28 30 28 42 Z" fill="#20242c"/><rect x="24" y="40" width="52" height="5" rx="2.5" fill="#20242c"/>';
-  } else if (def.hairStyle === 'bun') {
-    hairTop = '<circle cx="50" cy="24" r="9" fill="' + def.hair + '"/><path d="M26 46 Q26 22 50 22 Q74 22 74 46 Q74 34 62 30 Q50 26 38 30 Q26 34 26 46 Z" fill="' + def.hair + '"/>';
-  } else if (def.hairStyle === 'long') {
-    hairTop = '<path d="M24 88 Q20 30 50 20 Q80 30 76 88 L68 88 Q72 40 50 34 Q28 40 32 88 Z" fill="' + def.hair + '"/>';
-  } else if (def.hairStyle === 'bob') {
-    hairTop = '<path d="M26 62 Q22 22 50 20 Q78 22 74 62 L66 62 Q70 36 50 32 Q30 36 34 62 Z" fill="' + def.hair + '"/>';
+function faceMarkup(def) {
+  let hair = '';
+  if (def.style === 'cap') {
+    hair = '<path d="M28 42 Q50 14 72 42 Q72 30 50 26 Q28 30 28 42 Z" fill="#20242c"/><rect x="24" y="40" width="52" height="5" rx="2.5" fill="#20242c"/>';
+  } else if (def.style === 'bun') {
+    hair = '<circle cx="50" cy="24" r="9" fill="' + def.hair + '"/><path d="M26 46 Q26 22 50 22 Q74 22 74 46 Q74 34 62 30 Q50 26 38 30 Q26 34 26 46 Z" fill="' + def.hair + '"/>';
+  } else if (def.style === 'long') {
+    hair = '<path d="M24 88 Q20 30 50 20 Q80 30 76 88 L68 88 Q72 40 50 34 Q28 40 32 88 Z" fill="' + def.hair + '"/>';
+  } else if (def.style === 'bob') {
+    hair = '<path d="M26 62 Q22 22 50 20 Q78 22 74 62 L66 62 Q70 36 50 32 Q30 36 34 62 Z" fill="' + def.hair + '"/>';
   } else {
-    hairTop = '<path d="M27 44 Q27 22 50 22 Q73 22 73 44 Q70 32 50 30 Q30 32 27 44 Z" fill="' + def.hair + '"/>';
+    hair = '<path d="M27 44 Q27 22 50 22 Q73 22 73 44 Q70 32 50 30 Q30 32 27 44 Z" fill="' + def.hair + '"/>';
   }
-  let extras = '';
+  let extra = '';
   if (def.name === 'Sinta') {
-    extras = '<circle cx="40" cy="52" r="7" fill="none" stroke="#222" stroke-width="1.6"/><circle cx="60" cy="52" r="7" fill="none" stroke="#222" stroke-width="1.6"/><line x1="47" y1="52" x2="53" y2="52" stroke="#222" stroke-width="1.6"/>';
+    extra = '<circle cx="40" cy="52" r="7" fill="none" stroke="#222" stroke-width="1.6"/><circle cx="60" cy="52" r="7" fill="none" stroke="#222" stroke-width="1.6"/><line x1="47" y1="52" x2="53" y2="52" stroke="#222" stroke-width="1.6"/>';
   } else if (def.name === 'Bimo') {
-    extras = '<path d="M36 62 Q50 78 64 62 Q64 72 50 74 Q36 72 36 62 Z" fill="#2a1a10"/>';
+    extra = '<path d="M36 62 Q50 78 64 62 Q64 72 50 74 Q36 72 36 62 Z" fill="#2a1a10"/>';
   }
   return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100%" height="100%" style="display:block;border-radius:50%">'
     + '<rect width="100" height="100" fill="' + def.bg + '"/>'
     + '<path d="M18 100 Q22 74 50 72 Q78 74 82 100 Z" fill="' + def.shirt + '"/>'
     + '<circle cx="50" cy="52" r="21" fill="' + def.skin + '"/>'
-    + hairTop
+    + hair
     + '<circle cx="42" cy="52" r="2.2" fill="#1d1410"/><circle cx="58" cy="52" r="2.2" fill="#1d1410"/>'
     + '<path d="M44 63 Q50 67 56 63" fill="none" stroke="#7a4a30" stroke-width="1.8" stroke-linecap="round"/>'
-    + extras
+    + extra
     + '</svg>';
 }
 
-function paintTitlePortraits() {
+// Hanya lingkaran wajah di baris pemeran (#cast .face) yang dicat.
+// Tombol cara bermain (WASD, F, E, R, M) TIDAK disentuh, supaya tidak
+// ada lagi wajah nyasar di panel kanan layar judul.
+function paintCastFaces() {
   try {
-    const overlay = document.getElementById('title-overlay');
-    if (!overlay) return;
-    let bCount = 0;
-    const cands = overlay.querySelectorAll('*');
-    for (const el of cands) {
-      if (el.children.length > 0) continue;
+    const faces = document.querySelectorAll('#cast .face');
+    if (!faces || !faces.length) return;
+    let seenB = 0;
+    faces.forEach((el) => {
       const txt = (el.textContent || '').trim();
-      if (!/^[A-Z]$/.test(txt)) continue;
+      if (!/^[A-Z]$/.test(txt)) return;
       let def = null;
       if (txt === 'B') {
-        bCount += 1;
-        def = bCount === 1 ? FACE_DEFS[1] : FACE_DEFS[5];
+        seenB += 1;
+        def = seenB === 1 ? CAST_FACES[1] : CAST_FACES[5];
       } else {
-        def = FACE_DEFS.find((d) => d.letter === txt) || null;
+        def = CAST_FACES.find((d) => d.letter === txt) || null;
       }
-      if (!def) continue;
-      el.innerHTML = faceSvg(def);
+      if (!def) return;
+      el.innerHTML = faceMarkup(def);
       el.style.overflow = 'hidden';
-    }
+    });
   } catch (err) {
-    // potret tetap huruf bila gagal — jangan pernah merusak game
+    // Wajah tetap huruf bila gagal — jangan pernah merusak game.
   }
 }
 
@@ -254,46 +255,51 @@ export function createWorld() {
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(1);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.22;
+  // Ronde 6 putaran 2: exposure diturunkan (1,22 -> 1,05) supaya aspal
+  // tidak tercuci putih; langit tetap terang karena kubah langit dan
+  // sprite matahari tidak ikut tone mapping cahaya.
+  renderer.toneMappingExposure = 1.05;
   if ('outputColorSpace' in renderer && THREE.SRGBColorSpace) {
     renderer.outputColorSpace = THREE.SRGBColorSpace;
   }
-  // shadow map dimatikan: software GL terlalu lambat; cahaya + env
-  // sudah memberi bentuk yang terbaca.
+  // Tanpa shadow map: software GL terlalu lambat; cahaya + env sudah
+  // memberi bentuk yang terbaca.
   renderer.shadowMap.enabled = false;
   document.body.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
-  scene.fog = new THREE.Fog(0xe8936a, 120, 700);
-  scene.environment = envCanvasTexture();
+  // Kabut diundur (120 -> 150) supaya warna persik tidak menutupi
+  // aspal dan marka di jarak menengah.
+  scene.fog = new THREE.Fog(0xe8936a, 150, 700);
+  scene.environment = envTexture();
   scene.background = null;
 
   const sky = new THREE.Mesh(
     new THREE.SphereGeometry(880, 32, 20),
-    new THREE.MeshBasicMaterial({ map: skyCanvasTexture(), side: THREE.BackSide, fog: false })
+    new THREE.MeshBasicMaterial({ map: skyTexture(), side: THREE.BackSide, fog: false })
   );
   scene.add(sky);
 
   const camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.1, 2000);
   camera.position.set(0, 4, 12);
 
-  const hemi = new THREE.HemisphereLight(0xffd9c2, 0x6b4a3a, 1.15);
+  const hemi = new THREE.HemisphereLight(0xffd9c2, 0x6b4a3a, 0.95);
   scene.add(hemi);
-  const sun = new THREE.DirectionalLight(0xffb45e, 2.3);
+  const sun = new THREE.DirectionalLight(0xffb45e, 2.0);
   sun.position.set(-60, 55, -120);
   scene.add(sun);
   const fill = new THREE.DirectionalLight(0x9db8ff, 0.55);
   fill.position.set(50, 40, 90);
   scene.add(fill);
 
-  const sunGlowTex = new THREE.CanvasTexture(radialGlowCanvas(256, 'rgba(255,246,214,1)', 'rgba(255,176,92,0.9)'));
+  const sunGlowTex = new THREE.CanvasTexture(glowDisc(256, 'rgba(255,246,214,1)', 'rgba(255,176,92,0.9)'));
   sunGlowTex.colorSpace = THREE.SRGBColorSpace;
   const sunSprite = new THREE.Sprite(
     new THREE.SpriteMaterial({ map: sunGlowTex, transparent: true, depthWrite: false, fog: false })
   );
   sunSprite.scale.set(190, 190, 1);
   scene.add(sunSprite);
-  const sunCoreTex = new THREE.CanvasTexture(radialGlowCanvas(128, 'rgba(255,255,240,1)', 'rgba(255,220,140,0.95)'));
+  const sunCoreTex = new THREE.CanvasTexture(glowDisc(128, 'rgba(255,255,240,1)', 'rgba(255,220,140,0.95)'));
   sunCoreTex.colorSpace = THREE.SRGBColorSpace;
   const sunCore = new THREE.Sprite(
     new THREE.SpriteMaterial({ map: sunCoreTex, transparent: true, depthWrite: false, fog: false })
@@ -301,25 +307,25 @@ export function createWorld() {
   sunCore.scale.set(58, 58, 1);
   scene.add(sunCore);
 
-  const cloudTex = cloudSpriteTexture();
+  const cloudTex = cloudTexture();
   const clouds = [];
   for (let i = 0; i < 12; i++) {
     const sp = new THREE.Sprite(
-      new THREE.SpriteMaterial({ map: cloudTex, transparent: true, opacity: 0.55 + skyRand() * 0.3, depthWrite: false, fog: false })
+      new THREE.SpriteMaterial({ map: cloudTex, transparent: true, opacity: 0.55 + skyRng() * 0.3, depthWrite: false, fog: false })
     );
-    const sc = 90 + skyRand() * 160;
+    const sc = 90 + skyRng() * 160;
     sp.scale.set(sc, sc * 0.42, 1);
-    sp.position.set((skyRand() - 0.5) * 1200, 90 + skyRand() * 110, -350 - skyRand() * 420);
-    sp.userData.drift = 0.6 + skyRand() * 1.1;
+    sp.position.set((skyRng() - 0.5) * 1200, 90 + skyRng() * 110, -350 - skyRng() * 420);
+    sp.userData.drift = 0.6 + skyRng() * 1.1;
     scene.add(sp);
     clouds.push(sp);
   }
 
-  const rain = makeRain(scene);
+  const rain = buildRain(scene);
 
-  paintTitlePortraits();
+  paintCastFaces();
 
-  const world = {
+  return {
     scene,
     camera,
     renderer,
@@ -334,10 +340,9 @@ export function createWorld() {
     elapsed: 0,
     snapped: false,
   };
-  return world;
 }
 
-function resolveSubject(state) {
+function subjectOf(state) {
   const p = state.player || state.pemain || null;
   if (!p) return null;
   const car = p.car || p.vehicle || p.currentCar || p.mobil || null;
@@ -356,9 +361,10 @@ function resolveSubject(state) {
 }
 
 export function drawWorld(world, state) {
-  // Waktu dinding nyata antar frame: di software GL frame bisa 0,5 dtk,
-  // sementara state.dt tetap 0,016 — kamera yang memakai state.dt tidak
-  // pernah konvergen. Semua animasi visual + kamera memakai waktu nyata.
+  // Waktu dinding nyata antar frame: di software GL satu frame bisa
+  // 0,5 detik sementara state.dt tetap 0,016 — kamera yang memakai
+  // state.dt tidak pernah konvergen. Animasi visual + kamera memakai
+  // waktu nyata.
   const now = typeof performance !== 'undefined' ? performance.now() : 0;
   const dt = world.lastNow
     ? Math.min(Math.max((now - world.lastNow) / 1000, 0.001), 0.5)
@@ -367,7 +373,7 @@ export function drawWorld(world, state) {
   world.elapsed += dt;
   const t = world.elapsed;
 
-  const subj = resolveSubject(state);
+  const subj = subjectOf(state);
   if (subj && world.camera) {
     let fx = -Math.sin(subj.heading);
     let fz = -Math.cos(subj.heading);
@@ -376,15 +382,19 @@ export function drawWorld(world, state) {
       fx = subj.vel.x / len;
       fz = subj.vel.z / len;
     }
-    const dist = subj.inCar ? 9.5 : 5.4;
-    const height = subj.inCar ? 4.4 : 3.4;
+    // Ronde 6: kamera rendah-dekat. Di mobil, kamera hanya 7 meter di
+    // belakang dan 2,7 meter di atas jalan — bodi hero mengisi
+    // sepertiga bawah frame dan jalan memanjang ke cakrawala senja.
+    // Jalan kaki sedikit lebih dekat juga, nuansa over-shoulder.
+    const dist = subj.inCar ? 7.0 : 5.0;
+    const height = subj.inCar ? 2.7 : 3.1;
     const desired = new THREE.Vector3(
       subj.pos.x - fx * dist,
       subj.pos.y + height,
       subj.pos.z - fz * dist
     );
     const look = new THREE.Vector3(subj.pos.x + fx * 7, subj.pos.y + 1.4, subj.pos.z + fz * 7);
-    // menempel langsung bila kamera masih jauh (staging / awal frame)
+    // Menempel langsung bila kamera masih jauh (staging / awal frame).
     if (!world.snapped || world.camSmooth.distanceTo(desired) > 26) {
       world.camSmooth.copy(desired);
       world.lookSmooth.copy(look);
@@ -419,9 +429,9 @@ export function drawWorld(world, state) {
     if (c.position.x > 700) c.position.x = -700;
   }
 
-  if (world.rain) updateRain(world.rain, world.camera.position, dt);
+  if (world.rain) stepRain(world.rain, world.camera.position, dt);
 
-  // rambu neon berdenyut halus
+  // Rambu neon berdenyut halus.
   const anims = world.scene.userData.telukAnim;
   if (anims) {
     for (const a of anims) {

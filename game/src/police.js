@@ -1,12 +1,15 @@
-// police.js — Polisi Teluk Cerah: mobil patroli putih bergaris biru
-// dengan palang lampu merah-biru yang berkedip dan memantul di aspal
-// basah, petugas jalan kaki berfigur manusia, roadblock, dan level
-// wanted 0–5 dengan unit bernama.
-// Revisi 2: unit langsung mengapit pemain saat wanted tinggi (supaya
-// selalu terlihat di shot kejar-kejaran), roadblock rapi di depan.
-// Semua bentuk dibuat prosedural.
+// Polisi Teluk Cerah: mobil patroli putih bergaris biru dengan palang
+// lampu merah-biru yang berkedip dan memantul di aspal basah, petugas
+// jalan kaki berfigur manusia, roadblock, dan level wanted 0–5 dengan
+// unit bernama.
+// Revisi ronde 6 (putaran 3): slot formasi dipersempit — lateral
+// 4,2 meter dan sedikit lebih ke depan (5/3) — supaya kedua mobil
+// pengapit masuk penuh di dalam frame kamera rendah-dekat, bukan
+// terpotong tepi. Formasi tetap menyamakan laju hero dulu sebelum
+// mengoreksi posisi ke slotnya. Semua bentuk prosedural.
 
 let policeCache = null;
+let blinkPhase = 0;
 
 const UNIT_NAMES = [
   { name: 'CENDRAWASIH-07', kind: 'car' },
@@ -20,7 +23,7 @@ const UNIT_NAMES = [
   { name: 'NURI-12', kind: 'foot' },
 ];
 
-function glowTexture(color) {
+function radialTex(color) {
   const c = document.createElement('canvas');
   c.width = 64;
   c.height = 64;
@@ -35,7 +38,7 @@ function glowTexture(color) {
   return tex;
 }
 
-function rimTextureSmall() {
+function rimFace() {
   const c = document.createElement('canvas');
   c.width = 96;
   c.height = 96;
@@ -64,7 +67,7 @@ function rimTextureSmall() {
 
 // Mobil polisi: bodi putih membulat, garis biru, kaca mengkilap,
 // palang lampu merah-biru menyala. Depan menghadap -Z saat rotasi 0.
-function buildPoliceCarMesh() {
+function buildPatrolCar() {
   const car = new THREE.Group();
   const paint = new THREE.MeshStandardMaterial({
     color: 0xf2f4f6, metalness: 0.55, roughness: 0.28, envMapIntensity: 1.6,
@@ -94,17 +97,17 @@ function buildPoliceCarMesh() {
   cabin.scale.set(0.82, 0.52, 1.35);
   cabin.position.set(0, 0.95, 0.15);
   car.add(cabin);
-  // garis biru di sisi mengikuti lekuk bodi
+  // Garis biru di sisi mengikuti lekuk bodi.
   const stripeMat = new THREE.MeshStandardMaterial({ color: 0x1c4fd6, roughness: 0.4, metalness: 0.3 });
   for (const s of [-1, 1]) {
     const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.3, 3.4), stripeMat);
     stripe.position.set(s * 0.99, 0.55, 0.05);
     car.add(stripe);
-    const stripe2 = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.12, 3.4), stripeMat);
-    stripe2.position.set(s * 0.99, 0.85, 0.05);
-    car.add(stripe2);
+    const thin = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.12, 3.4), stripeMat);
+    thin.position.set(s * 0.99, 0.85, 0.05);
+    car.add(thin);
   }
-  // palang lampu: alas + dua kubah menyala + pijar
+  // Palang lampu: alas + dua kubah menyala + pijar.
   const barBase = new THREE.Mesh(
     new THREE.CylinderGeometry(0.16, 0.2, 1.15, 10),
     new THREE.MeshStandardMaterial({ color: 0x1a1a1e, roughness: 0.4, metalness: 0.6 })
@@ -124,22 +127,21 @@ function buildPoliceCarMesh() {
   blueDome.position.set(0.3, 1.3, 0.15);
   car.add(blueDome);
   const redGlow = new THREE.Sprite(new THREE.SpriteMaterial({
-    map: glowTexture('rgba(255,40,50,0.95)'), transparent: true, opacity: 0.9, depthWrite: false,
+    map: radialTex('rgba(255,40,50,0.95)'), transparent: true, opacity: 0.9, depthWrite: false,
   }));
   redGlow.scale.set(2.2, 2.2, 1);
   redGlow.position.set(-0.3, 1.35, 0.15);
   car.add(redGlow);
   const blueGlow = new THREE.Sprite(new THREE.SpriteMaterial({
-    map: glowTexture('rgba(60,110,255,0.95)'), transparent: true, opacity: 0.9, depthWrite: false,
+    map: radialTex('rgba(60,110,255,0.95)'), transparent: true, opacity: 0.9, depthWrite: false,
   }));
   blueGlow.scale.set(2.2, 2.2, 1);
   blueGlow.position.set(0.3, 1.35, 0.15);
   car.add(blueGlow);
-  // pijar di aspal basah di bawah palang lampu
-  const poolTex = glowTexture('rgba(120,90,255,0.8)');
+  // Pijar di aspal basah di bawah palang lampu.
   const pool = new THREE.Mesh(
     new THREE.CircleGeometry(2.4, 20),
-    new THREE.MeshBasicMaterial({ map: poolTex, transparent: true, opacity: 0.4, depthWrite: false })
+    new THREE.MeshBasicMaterial({ map: radialTex('rgba(120,90,255,0.8)'), transparent: true, opacity: 0.4, depthWrite: false })
   );
   pool.rotation.x = -Math.PI / 2;
   pool.position.set(0, 0.06, 0.15);
@@ -156,9 +158,9 @@ function buildPoliceCarMesh() {
   tailBar.rotation.z = Math.PI / 2;
   tailBar.position.set(0, 0.62, 2.3);
   car.add(tailBar);
-  const rimTex = rimTextureSmall();
+  const rimTex = rimFace();
   const wheels = [];
-  for (const [x, z] of [[-1.0, -1.5], [1.0, -1.5], [-1.0, 1.5], [1.0, 1.5]]) {
+  for (const wp of [[-1.0, -1.5], [1.0, -1.5], [-1.0, 1.5], [1.0, 1.5]]) {
     const wheel = new THREE.Group();
     const tire = new THREE.Mesh(
       new THREE.CylinderGeometry(0.38, 0.38, 0.3, 18),
@@ -173,7 +175,7 @@ function buildPoliceCarMesh() {
       cap.rotation.y = s * Math.PI / 2;
       wheel.add(cap);
     }
-    wheel.position.set(x, 0.42, z);
+    wheel.position.set(wp[0], 0.42, wp[1]);
     car.add(wheel);
     wheels.push(wheel);
   }
@@ -187,7 +189,7 @@ function buildPoliceCarMesh() {
 }
 
 // Petugas jalan kaki: seragam biru gelap, topi, lencana.
-function buildOfficerFigure() {
+function buildOfficer() {
   const fig = new THREE.Group();
   const navy = new THREE.MeshStandardMaterial({ color: 0x1e3a6e, roughness: 0.85 });
   const darkPants = new THREE.MeshStandardMaterial({ color: 0x1a2432, roughness: 0.9 });
@@ -231,7 +233,7 @@ function buildOfficerFigure() {
     head.add(eye);
   }
   const pivots = { head, torso };
-  function buildArm(side) {
+  function arm(side) {
     const shoulder = new THREE.Group();
     shoulder.position.set(side * 0.26, 1.44, 0);
     fig.add(shoulder);
@@ -249,9 +251,9 @@ function buildOfficerFigure() {
     elbow.add(hand);
     return { shoulder, elbow, hand };
   }
-  pivots.armL = buildArm(-1);
-  pivots.armR = buildArm(1);
-  function buildLeg(side) {
+  pivots.armL = arm(-1);
+  pivots.armR = arm(1);
+  function leg(side) {
     const hip = new THREE.Group();
     hip.position.set(side * 0.1, 0.92, 0);
     fig.add(hip);
@@ -271,24 +273,46 @@ function buildOfficerFigure() {
     knee.add(shoe);
     return { hip, knee, shoe };
   }
-  pivots.legL = buildLeg(-1);
-  pivots.legR = buildLeg(1);
+  pivots.legL = leg(-1);
+  pivots.legR = leg(1);
   fig.userData.pivots = pivots;
   return { group: fig, pivots };
 }
 
-function playerPos(state) {
+function holderPos(state) {
   const p = state.player || state.pemain;
   if (!p) return null;
   const holder = p.car || p.vehicle || p.currentCar || p;
   return holder.position || holder.group?.position || null;
 }
 
-function playerHeading(state) {
+function holderHeading(state) {
   const p = state.player || state.pemain;
   if (!p) return 0;
   const holder = p.car || p.vehicle || p.currentCar || p;
   return holder.heading ?? holder.angle ?? 0;
+}
+
+// Slot formasi: sejajar hidung hero, satu di kiri dan satu di kanan.
+// long diukur ke depan dari pusat pemain, lat ke kanan pemain.
+// Putaran 3: lateral 4,2 meter (dari 5,2) dan long 5/3 (dari 4/2)
+// supaya kedua mobil masuk penuh di dalam frame kamera rendah-dekat.
+function formationSlot(pp, heading, idx) {
+  const fx = -Math.sin(heading);
+  const fz = -Math.cos(heading);
+  const rx = -fz;
+  const rz = fx;
+  const long = idx === 0 ? 5 : 3;
+  const lat = idx === 0 ? -4.2 : 4.2;
+  return { x: pp.x + fx * long + rx * lat, z: pp.z + fz * long + rz * lat };
+}
+
+function resolveUnits(state) {
+  const stored = state.police;
+  if (Array.isArray(stored) && stored.length) return stored;
+  if (stored && Array.isArray(stored.units) && stored.units.length) return stored.units;
+  if (policeCache && policeCache.units) return policeCache.units;
+  return [];
 }
 
 export function createPolice(state) {
@@ -296,11 +320,11 @@ export function createPolice(state) {
   const scene = world?.scene || world;
   const wanted = typeof state.wanted === 'number' ? state.wanted : 0;
   const units = [];
-  const pp = playerPos(state) || { x: 28, z: 46 };
+  const pp = holderPos(state) || { x: 28, z: 46 };
   const carCount = Math.min(3 + wanted, 6);
   for (let i = 0; i < carCount; i++) {
     const def = UNIT_NAMES[i % UNIT_NAMES.length];
-    const mesh = buildPoliceCarMesh();
+    const mesh = buildPatrolCar();
     const ang = (i / carCount) * Math.PI * 2;
     const dist = 10 + i * 5;
     mesh.position.set(pp.x + Math.sin(ang) * dist, 0, pp.z + Math.cos(ang) * dist);
@@ -323,7 +347,7 @@ export function createPolice(state) {
   const footCount = wanted >= 2 ? 2 : 0;
   for (let i = 0; i < footCount; i++) {
     const def = UNIT_NAMES[6 + i];
-    const built = buildOfficerFigure();
+    const built = buildOfficer();
     const ang = Math.random() * Math.PI * 2;
     built.group.position.set(pp.x + Math.sin(ang) * 8, 0, pp.z + Math.cos(ang) * 8);
     if (scene && scene.add) scene.add(built.group);
@@ -356,10 +380,9 @@ export function createPolice(state) {
 export function setWanted(state, level) {
   const clamped = Math.max(0, Math.min(5, Math.round(level)));
   state.wanted = clamped;
-  const police = state.police || policeCache;
-  if (police) {
-    police.wanted = clamped;
-    police.level = clamped;
+  if (policeCache) {
+    policeCache.wanted = clamped;
+    policeCache.level = clamped;
   }
   return clamped;
 }
@@ -370,36 +393,44 @@ export function addHeat(state, amount) {
 }
 
 export function updatePolice(state, dt) {
-  const police = state.police || policeCache;
-  if (!police || !police.units) return;
+  const units = resolveUnits(state);
+  if (!units.length) return;
   const step = Math.min(dt, 0.05);
-  const pp = playerPos(state);
+  const pp = holderPos(state);
   const wanted = typeof state.wanted === 'number' ? state.wanted : 0;
-  police.wanted = wanted;
-  police.level = wanted;
+  if (policeCache) {
+    policeCache.wanted = wanted;
+    policeCache.level = wanted;
+  }
   const t = performance.now() * 0.001;
-  police.blinkPhase = (police.blinkPhase || 0) + step * 6;
-  const blinkOn = Math.sin(police.blinkPhase) > 0;
-  const pHeading = playerHeading(state);
+  blinkPhase += step * 6;
+  if (policeCache) policeCache.blinkPhase = blinkPhase;
+  const blinkOn = Math.sin(blinkPhase) > 0;
+  const pHeading = holderHeading(state);
   const pfx = -Math.sin(pHeading);
   const pfz = -Math.cos(pHeading);
-
-  // bila wanted tinggi tapi unit masih jauh, langsung tempatkan dua
-  // mobil mengapit pemain (kiri-kanan, sedikit di belakang) supaya
-  // kejar-kejaran selalu terlihat di frame.
-  if (wanted >= 3 && pp) {
-    const carUnits = police.units.filter((u) => (u.type === 'car' || u.kind === 'car') && u.group);
+  const player = state.player || state.pemain || null;
+  const inCar = !!(player && (player.car || player.vehicle || player.currentCar));
+  const pace = Math.abs((player && player.speed) || 0);
+  // Formasi kejar-kejaran: hanya saat pemain ngebut di mobil dengan
+  // wanted tinggi. Dua mobil pertama menahan posisi mengapit hero;
+  // unit yang masih jauh langsung ditempatkan ke slotnya.
+  const forming = wanted >= 3 && pp && inCar && pace > 12;
+  const carUnits = units.filter((u) => (u.type === 'car' || u.kind === 'car') && u.group);
+  if (forming) {
     carUnits.forEach((u, idx) => {
+      if (idx >= 2) return;
+      if (u.status === 'roadblock') return;
+      const slot = formationSlot(pp, pHeading, idx);
       const d = Math.hypot(u.position.x - pp.x, u.position.z - pp.z);
-      if (d > 45 && idx < 2) {
-        const side = idx === 0 ? -1 : 1;
-        const back = 4 + idx * 4;
-        u.position.set(pp.x - pfx * back + -pfz * side * 5.2, 0, pp.z - pfz * back + pfx * side * 5.2);
+      if (d > 45) {
+        u.position.set(slot.x, 0, slot.z);
         u.heading = pHeading;
         u.group.rotation.y = pHeading;
       }
+      u.status = 'pursuit';
+      u.distance = Math.round(Math.hypot(slot.x - pp.x, slot.z - pp.z));
     });
-    // roadblock wanted 4-5: dua mobil melintang jauh di depan pemain
     if (wanted >= 4 && carUnits.length >= 4) {
       const rb = carUnits[3];
       const d = Math.hypot(rb.position.x - pp.x, rb.position.z - pp.z);
@@ -412,7 +443,8 @@ export function updatePolice(state, dt) {
     }
   }
 
-  for (const unit of police.units) {
+  for (let idx = 0; idx < units.length; idx++) {
+    const unit = units[idx];
     if (!unit.group) continue;
     const ud = unit.group.userData;
     if (ud.redGlow) ud.redGlow.material.opacity = blinkOn ? 0.95 : 0.15;
@@ -420,7 +452,7 @@ export function updatePolice(state, dt) {
     if (ud.redDome) ud.redDome.material.emissiveIntensity = blinkOn ? 3.2 : 0.4;
     if (ud.blueDome) ud.blueDome.material.emissiveIntensity = blinkOn ? 0.4 : 3.2;
     if (ud.pool) {
-      ud.pool.material.opacity = 0.3 + Math.sin(police.blinkPhase) * 0.12;
+      ud.pool.material.opacity = 0.3 + Math.sin(blinkPhase) * 0.12;
       ud.pool.material.color.setHex(blinkOn ? 0xff3344 : 0x3355ff);
     }
     if (!pp) continue;
@@ -435,6 +467,26 @@ export function updatePolice(state, dt) {
     if (unit.type === 'car' || unit.kind === 'car') {
       if (unit.status === 'roadblock') {
         unit.speed = 0;
+        continue;
+      }
+      // Dua unit formasi: samakan dulu lajunya dengan hero (supaya
+      // tidak tertinggal ke arah kamera), baru koreksi pelan ke slot.
+      const carIdx = carUnits.indexOf(unit);
+      if (forming && carIdx >= 0 && carIdx < 2) {
+        const slot = formationSlot(pp, pHeading, carIdx);
+        unit.position.x += pfx * pace * step;
+        unit.position.z += pfz * pace * step;
+        const ease = Math.min(1, step * 5);
+        unit.position.x += (slot.x - unit.position.x) * ease;
+        unit.position.z += (slot.z - unit.position.z) * ease;
+        unit.heading = pHeading;
+        unit.group.rotation.y = pHeading;
+        unit.speed = pace;
+        unit.status = 'pursuit';
+        if (unit.group.userData.wheels) {
+          const spin = (pace * step) / 0.38;
+          for (const w of unit.group.userData.wheels) w.rotation.x += spin;
+        }
         continue;
       }
       const chaseSpeed = Math.min(30, 13 + wanted * 3.2);
@@ -481,9 +533,8 @@ export function updatePolice(state, dt) {
 
 // Memastikan unit polisi ada (dipakai staging/shot).
 export function ensurePolice(state) {
-  const existing = state.police || policeCache;
+  const existing = state.police && state.police.units ? state.police : policeCache;
   if (existing && existing.units && existing.units.length) return existing;
   const made = createPolice(state);
-  state.police = made;
   return made;
 }

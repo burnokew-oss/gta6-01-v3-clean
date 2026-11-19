@@ -1,13 +1,15 @@
-// helicopter.js — GARUDA-1: helikopter polisi dengan bodi membulat
-// terang, kaca kokpit mengkilap, ekor bersirip, rotor utama berputar,
-// rotor ekor, lampu navigasi, dan sorot lampu yang terarah ke jalan.
-// Revisi 2: bodi lebih terang supaya terbaca di langit senja, langsung
-// menempel di atas pemain saat staging, genangan sorot lebih kecil.
-// Semua bentuk dibuat prosedural; tidak ada aset luar.
+// GARUDA-1: helikopter polisi dengan bodi membulat terang, kaca
+// kokpit mengkilap, ekor bersirip, rotor utama berputar, rotor ekor,
+// lampu navigasi, dan sorot lampu yang terarah ke jalan.
+// Revisi ronde 6 (putaran 4): hover didorong jauh dan tinggi — 40
+// meter di depan pemain, 20 meter di atas jalan — supaya helikopter
+// terbaca utuh sebagai siluet kecil di langit (bodi, ekor, rotor)
+// dari kamera rendah-dekat, bukan gumpalan besar dari bawah.
+// Semua bentuk dibuat prosedural.
 
 let heliCache = null;
 
-function glowTexture(color) {
+function radialTex(color) {
   const c = document.createElement('canvas');
   c.width = 64;
   c.height = 64;
@@ -22,7 +24,7 @@ function glowTexture(color) {
   return tex;
 }
 
-function buildHeliMesh() {
+function buildHeli() {
   const heli = new THREE.Group();
   const paint = new THREE.MeshStandardMaterial({
     color: 0x9ab0c4, metalness: 0.45, roughness: 0.35, envMapIntensity: 1.4,
@@ -34,18 +36,18 @@ function buildHeliMesh() {
     color: 0x18222e, metalness: 0.9, roughness: 0.06, envMapIntensity: 2.6,
   });
 
-  // bodi utama: ellipsoid membulat terang
+  // Bodi utama: ellipsoid membulat terang.
   const body = new THREE.Mesh(new THREE.SphereGeometry(1.6, 24, 18), paint);
   body.scale.set(1.05, 0.95, 1.7);
   body.castShadow = true;
   heli.add(body);
-  // garis navy di sisi + tulisan GARUDA-1
+  // Garis navy di sisi.
   const stripe = new THREE.Mesh(new THREE.CylinderGeometry(1.62, 1.62, 0.34, 24, 1, true), navyMat);
   stripe.rotation.x = Math.PI / 2;
   stripe.scale.set(1.02, 1, 0.92);
   stripe.position.y = -0.12;
   heli.add(stripe);
-  // kaca kokpit: kubah depan yang mengkilap
+  // Kaca kokpit: kubah depan yang mengkilap.
   const canopy = new THREE.Mesh(new THREE.SphereGeometry(1.05, 20, 14), glass);
   canopy.scale.set(0.95, 0.72, 0.9);
   canopy.position.set(0, 0.28, -1.35);
@@ -61,7 +63,7 @@ function buildHeliMesh() {
   sensor.position.set(0, -1.05, -1.2);
   heli.add(sensor);
 
-  // ekor memanjang dengan sirip tegak dan sirip bawah
+  // Ekor memanjang dengan sirip tegak dan sirip bawah.
   const tail = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.62, 3.4, 10), paint);
   tail.rotation.x = Math.PI / 2 - 0.12;
   tail.position.set(0, 0.35, 3.1);
@@ -91,7 +93,7 @@ function buildHeliMesh() {
   stab.position.set(0, 0.62, 3.9);
   heli.add(stab);
 
-  // rotor ekor kecil
+  // Rotor ekor kecil.
   const tailRotor = new THREE.Group();
   for (let i = 0; i < 3; i++) {
     const blade = new THREE.Mesh(
@@ -108,7 +110,7 @@ function buildHeliMesh() {
   tailRotor.position.set(0.42, 0.62, 4.75);
   heli.add(tailRotor);
 
-  // tiang + rotor utama dengan bilah melengkung
+  // Tiang + rotor utama dengan bilah melengkung.
   const mast = new THREE.Mesh(
     new THREE.CylinderGeometry(0.16, 0.2, 0.7, 8),
     new THREE.MeshStandardMaterial({ color: 0x1a1a1e, roughness: 0.5, metalness: 0.6 })
@@ -145,7 +147,7 @@ function buildHeliMesh() {
   rotor.add(blurDisc);
   heli.add(rotor);
 
-  // skid pendaratan melengkung
+  // Skid pendaratan melengkung.
   const skidMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1e, roughness: 0.5, metalness: 0.6 });
   for (const s of [-1, 1]) {
     const skid = new THREE.Mesh(new THREE.TorusGeometry(1.9, 0.06, 8, 24, Math.PI * 0.85), skidMat);
@@ -161,7 +163,7 @@ function buildHeliMesh() {
     }
   }
 
-  // lampu navigasi: merah kiri, hijau kanan, putih ekor
+  // Lampu navigasi: merah kiri, hijau kanan, putih ekor.
   const navRed = new THREE.Mesh(
     new THREE.SphereGeometry(0.12, 8, 6),
     new THREE.MeshStandardMaterial({ color: 0x881111, emissive: 0xff2222, emissiveIntensity: 2.5 })
@@ -180,7 +182,7 @@ function buildHeliMesh() {
   );
   navWhite.position.set(0, 0.6, 4.85);
   heli.add(navWhite);
-  // lampu sorot bawah (strobe putih) yang berkedip pelan
+  // Lampu sorot bawah (strobe putih) yang berkedip pelan.
   const strobe = new THREE.Mesh(
     new THREE.SphereGeometry(0.14, 8, 6),
     new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 3 })
@@ -188,18 +190,17 @@ function buildHeliMesh() {
   strobe.position.set(0, -1.15, -0.4);
   heli.add(strobe);
 
-  // sorot lampu: kerucut lembut + lampu sorot nyata + genangan terang
+  // Sorot lampu: kerucut lembut + lampu sorot nyata + genangan terang.
   const spotMat = new THREE.MeshBasicMaterial({
-    color: 0xfff2c8, transparent: true, opacity: 0.13, side: THREE.DoubleSide, depthWrite: false,
+    color: 0xfff2c8, transparent: true, opacity: 0.16, side: THREE.DoubleSide, depthWrite: false,
   });
   const cone = new THREE.Mesh(new THREE.ConeGeometry(5.5, 26, 24, 1, true), spotMat);
   cone.position.set(0, -14.2, -1);
   cone.rotation.x = 0.06;
   heli.add(cone);
-  const poolTex = glowTexture('rgba(255,240,190,0.95)');
   const pool = new THREE.Mesh(
     new THREE.CircleGeometry(4.0, 28),
-    new THREE.MeshBasicMaterial({ map: poolTex, transparent: true, opacity: 0.15, depthWrite: false })
+    new THREE.MeshBasicMaterial({ map: radialTex('rgba(255,240,190,0.95)'), transparent: true, opacity: 0.15, depthWrite: false })
   );
   pool.rotation.x = -Math.PI / 2;
   pool.position.set(0, -26.5, -3.5);
@@ -221,17 +222,24 @@ function buildHeliMesh() {
   return heli;
 }
 
-function playerPos(state) {
+function holderPos(state) {
   const p = state.player || state.pemain;
   if (!p) return null;
   const holder = p.car || p.vehicle || p.currentCar || p;
   return holder.position || holder.group?.position || null;
 }
 
+function holderHeading(state) {
+  const p = state.player || state.pemain;
+  if (!p) return 0;
+  const holder = p.car || p.vehicle || p.currentCar || p;
+  return holder.heading ?? holder.angle ?? 0;
+}
+
 export function createHelicopter(state) {
   const world = state.world || state.scene || null;
   const scene = world?.scene || world;
-  const mesh = buildHeliMesh();
+  const mesh = buildHeli();
   mesh.position.set(0, 26, -30);
   if (scene && scene.add) scene.add(mesh);
   const heli = {
@@ -252,7 +260,7 @@ export function updateHelicopter(state, dt) {
   if (!heli || !heli.group) return;
   const step = Math.min(dt, 0.05);
   const wanted = typeof state.wanted === 'number' ? state.wanted : 0;
-  const pp = playerPos(state);
+  const pp = holderPos(state);
   const t = performance.now() * 0.001;
 
   if (heli.group.userData.rotor) heli.group.userData.rotor.rotation.y += heli.rotorSpeed * step;
@@ -262,12 +270,20 @@ export function updateHelicopter(state, dt) {
   }
 
   if (wanted >= 3 && pp) {
-    const hoverH = 24 + Math.sin(t * 0.7) * 1.5;
-    const tx = pp.x + Math.sin(t * 0.4) * 6;
-    const tz = pp.z - 14 + Math.cos(t * 0.33) * 5;
+    // Melayang di depan atas pemain: 40 meter ke arah hadap, 5 meter
+    // ke kiri, 20 meter di atas jalan — helikopter terbaca utuh
+    // sebagai siluet kecil di langit dari kamera rendah-dekat.
+    const heading = holderHeading(state);
+    const fx = -Math.sin(heading);
+    const fz = -Math.cos(heading);
+    const rx = -fz;
+    const rz = fx;
+    const hoverH = 20 + Math.sin(t * 0.7) * 1.2;
+    const tx = pp.x + fx * 40 + rx * -5;
+    const tz = pp.z + fz * 40 + rz * -5;
     const far = Math.hypot(tx - heli.group.position.x, tz - heli.group.position.z);
     if (far > 80 || Math.abs(hoverH - heli.group.position.y) > 20) {
-      // menempel langsung saat staging / teleport jauh
+      // Menempel langsung saat staging / teleport jauh.
       heli.group.position.set(tx, hoverH, tz);
     } else {
       heli.group.position.x += (tx - heli.group.position.x) * Math.min(1, step * 0.8);
@@ -284,7 +300,7 @@ export function updateHelicopter(state, dt) {
       const dz = pp.z - heli.group.position.z;
       cone.rotation.z = -dx * 0.012;
       cone.rotation.x = 0.06 + dz * 0.006;
-      cone.material.opacity = 0.12 + Math.sin(t * 2.2) * 0.03;
+      cone.material.opacity = 0.16 + Math.sin(t * 2.2) * 0.03;
     }
     if (pool) {
       pool.position.x = pp.x - heli.group.position.x;
