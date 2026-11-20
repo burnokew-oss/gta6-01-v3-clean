@@ -1,5 +1,9 @@
 # Teluk Cerah
 
+[![make.fun · gta6-01](https://make.fun/badge/gta6-01.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+[![rank](https://make.fun/badge/gta6-01/burnokew-oss/gta6-01-v3-clean/rank.svg)](https://make.fun/bounty/gta6-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+[![reward](https://make.fun/badge/gta6-01/burnokew-oss/gta6-01-v3-clean/reward.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+
 [![Kompetisi make.fun gta6-01](https://img.shields.io/badge/make.fun-gta6--01%20Make%20GTA%206-6c3df4)](https://make.fun/c/gta6-01)
 [![Peringkat berbayar](https://img.shields.io/badge/rank-top%20100%20berbayar-f59e0b)](https://make.fun/c/gta6-01)
 [![Total hadiah](https://img.shields.io/badge/reward-%241%2C666%20USDC-16a34a)](https://make.fun/c/gta6-01)
