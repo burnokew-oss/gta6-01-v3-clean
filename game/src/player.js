@@ -1,124 +1,105 @@
-// Figur manusia beranatomi penuh + pemain Raka.
-import "three";
-const THREE = window.THREE;
-import { CONFIG } from "./config.js";
+// player.js — Raka: karakter jalan kaki beranatomi penuh dan mode
+// mengemudi mobil hero, kamera orang ketiga rendah-dekat saat chase.
+import { makeCar } from "./vehicles.js";
+import { makePerson, animatePerson } from "./pedestrians.js";
+import { mulberry32 } from "./random.js";
+import { VEHICLES } from "./config.js";
 
-const skinTones = [0xc98d64, 0xa96b42, 0x8a5433, 0xe0aa7e];
-
-export function buildHuman(opts = {}) {
-  const g = new THREE.Group();
-  const skin = new THREE.MeshStandardMaterial({ color: opts.skin ?? skinTones[0], roughness: 0.72 });
-  const shirt = new THREE.MeshStandardMaterial({ color: opts.shirt ?? 0x2f6fd0, roughness: 0.85 });
-  const pants = new THREE.MeshStandardMaterial({ color: opts.pants ?? 0x2c3242, roughness: 0.9 });
-  const dark = new THREE.MeshStandardMaterial({ color: 0x22242c, roughness: 0.8 });
-  const hairMat = new THREE.MeshStandardMaterial({ color: opts.hair ?? 0x241a12, roughness: 0.95 });
-
-  const hips = new THREE.Group(); hips.position.y = 0.98; g.add(hips);
-  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.21, 0.34, 6, 12), shirt);
-  torso.position.y = 0.34; torso.scale.set(1.12, 1, 0.78); torso.castShadow = true; hips.add(torso);
-  const belt = new THREE.Mesh(new THREE.CylinderGeometry(0.225, 0.235, 0.07, 12), dark);
-  belt.position.y = 0.08; belt.scale.z = 0.8; hips.add(belt);
-
-  const headG = new THREE.Group(); headG.position.y = 0.78; hips.add(headG);
-  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.08, 0.12, 10), skin); neck.position.y = -0.05; headG.add(neck);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.155, 18, 14), skin);
-  head.scale.set(0.92, 1.08, 0.98); head.castShadow = true; headG.add(head);
-  const hair = new THREE.Mesh(new THREE.SphereGeometry(0.16, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.52), hairMat);
-  hair.position.y = 0.025; hair.scale.set(0.95, 1.05, 1); headG.add(hair);
-  if (opts.hat) {
-    const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.21, 0.21, 0.025, 16), dark); brim.position.y = 0.1; headG.add(brim);
-    const top = new THREE.Mesh(new THREE.SphereGeometry(0.145, 14, 8, 0, Math.PI * 2, 0, Math.PI * 0.55), new THREE.MeshStandardMaterial({ color: opts.hat, roughness: 0.8 }));
-    top.position.y = 0.1; headG.add(top);
+export class Player {
+  constructor(scene) {
+    const rng = mulberry32(777);
+    this.avatar = makePerson(rng, { shirt: 0xd92323, pants: 0x1e3a5f, skin: 0xc98a5a });
+    this.avatar.scale.setScalar(1.06);
+    scene.add(this.avatar);
+    const heroSpec = VEHICLES[0];
+    this.car = makeCar({ color: heroSpec.color, plate: heroSpec.plate });
+    scene.add(this.car);
+    this.mode = "drive";
+    this.x = 0; this.z = 0; this.angle = 0;
+    this.speed = 0;
+    this.carX = -6; this.carZ = 0; this.carAngle = 0; this.carSpeed = 0;
+    this.hp = 100; this.armor = 50;
+    this.money = 850; this.rep = 12;
+    this.nos = 100; this.nosLevel = 0; this.engineLevel = 0;
+    this.placeHero(0, 0, 0);
   }
-  const eyeMat = new THREE.MeshBasicMaterial({ color: 0x1c1410 });
-  for (const sx of [-0.055, 0.055]) {
-    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.014, 6, 6), eyeMat);
-    eye.position.set(sx, 0.01, 0.145); headG.add(eye);
+  placeHero(x, z, angle) {
+    this.carX = x; this.carZ = z; this.carAngle = angle; this.carSpeed = 0;
+    this.x = x; this.z = z; this.angle = angle;
+    this.syncMeshes(0);
   }
-  const nose = new THREE.Mesh(new THREE.SphereGeometry(0.02, 6, 6), skin);
-  nose.position.set(0, -0.03, 0.152); nose.scale.set(0.8, 1.2, 0.8); headG.add(nose);
-
-  function arm(side) {
-    const sh = new THREE.Group(); sh.position.set(0.27 * side, 0.58, 0); hips.add(sh);
-    const up = new THREE.Mesh(new THREE.CapsuleGeometry(0.062, 0.2, 4, 8), shirt); up.position.y = -0.15; up.castShadow = true; sh.add(up);
-    const el = new THREE.Group(); el.position.y = -0.3; sh.add(el);
-    const fo = new THREE.Mesh(new THREE.CapsuleGeometry(0.05, 0.18, 4, 8), skin); fo.position.y = -0.14; el.add(fo);
-    const hand = new THREE.Mesh(new THREE.SphereGeometry(0.055, 8, 8), skin); hand.position.y = -0.3; hand.scale.set(0.8, 1.15, 0.9); el.add(hand);
-    sh.rotation.z = side * 0.14;
-    return { sh, el };
+  enterExit() {
+    if (this.mode === "drive") {
+      this.mode = "foot";
+      this.x = this.carX + Math.cos(this.carAngle + Math.PI / 2) * 2.2;
+      this.z = this.carZ - Math.sin(this.carAngle + Math.PI / 2) * 2.2;
+      this.avatar.visible = true;
+    } else {
+      const d = Math.hypot(this.x - this.carX, this.z - this.carZ);
+      if (d < 4.5) { this.mode = "drive"; this.avatar.visible = false; }
+    }
   }
-  function leg(side) {
-    const hip = new THREE.Group(); hip.position.set(0.1 * side, 0, 0); hips.add(hip);
-    const th = new THREE.Mesh(new THREE.CapsuleGeometry(0.085, 0.24, 4, 8), pants); th.position.y = -0.22; th.castShadow = true; hip.add(th);
-    const kn = new THREE.Group(); kn.position.y = -0.44; hip.add(kn);
-    const sh2 = new THREE.Mesh(new THREE.CapsuleGeometry(0.065, 0.24, 4, 8), pants); sh2.position.y = -0.2; kn.add(sh2);
-    const shoe = new THREE.Mesh(new THREE.SphereGeometry(0.09, 10, 8), dark);
-    shoe.position.set(0, -0.42, 0.045); shoe.scale.set(0.85, 0.5, 1.7); kn.add(shoe);
-    return { hip, kn };
+  update(dt, input, t) {
+    if (this.mode === "drive") {
+      const accel = 22 + this.engineLevel * 3;
+      const top = 46 + this.engineLevel * 4;
+      if (input.forward) this.carSpeed += accel * dt;
+      else if (input.back) this.carSpeed -= (this.carSpeed > 0.5 ? 30 : 10) * dt;
+      else this.carSpeed -= this.carSpeed * 0.7 * dt;
+      let boost = 1;
+      if (input.sprint && this.nos > 0 && this.carSpeed > 4) { boost = 1.45; this.nos = Math.max(0, this.nos - dt * 32); }
+      else this.nos = Math.min(100, this.nos + dt * 5);
+      this.carSpeed = Math.max(-12, Math.min(top * boost, this.carSpeed));
+      const steer = (input.left ? 1 : 0) - (input.right ? 1 : 0);
+      if (Math.abs(this.carSpeed) > 0.4) this.carAngle += steer * dt * 1.55 * Math.sign(this.carSpeed) * Math.min(1, Math.abs(this.carSpeed) / 12);
+      this.carX += Math.cos(this.carAngle) * this.carSpeed * dt;
+      this.carZ += -Math.sin(this.carAngle) * this.carSpeed * dt;
+      this.carX = Math.max(-124, Math.min(124, this.carX));
+      this.carZ = Math.max(-124, Math.min(126, this.carZ));
+      this.x = this.carX; this.z = this.carZ; this.angle = this.carAngle;
+      this.speed = this.carSpeed;
+    } else {
+      const sp = input.sprint ? 8.5 : 4.6;
+      let mx = 0, mz = 0;
+      if (input.forward) mz -= 1;
+      if (input.back) mz += 1;
+      if (input.left) mx -= 1;
+      if (input.right) mx += 1;
+      const len = Math.hypot(mx, mz) || 1;
+      if (mx || mz) {
+        this.x += (mx / len) * sp * dt;
+        this.z += (mz / len) * sp * dt;
+        this.angle = Math.atan2(-(mz / len), mx / len);
+        this.speed = sp;
+      } else this.speed = 0;
+      this.x = Math.max(-124, Math.min(124, this.x));
+      this.z = Math.max(-124, Math.min(126, this.z));
+    }
+    this.syncMeshes(t);
   }
-  const armL = arm(-1), armR = arm(1), legL = leg(-1), legR = leg(1);
-  g.userData.parts = { hips, headG, armL, armR, legL, legR };
-  return g;
-}
-
-export function poseAim(human, on) {
-  const p = human.userData.parts;
-  if (on) {
-    p.armR.sh.rotation.x = -1.35; p.armR.sh.rotation.z = -0.1; p.armR.el.rotation.x = -0.15;
-    p.armL.sh.rotation.x = -1.2; p.armL.sh.rotation.z = 0.5; p.armL.el.rotation.x = -0.5;
-  } else {
-    p.armR.sh.rotation.x = 0; p.armL.sh.rotation.x = 0; p.armL.sh.rotation.z = 0.14; p.armL.el.rotation.x = 0;
+  syncMeshes(t) {
+    this.car.position.set(this.carX, 0, this.carZ);
+    this.car.rotation.y = this.carAngle;
+    for (const w of this.car.userData.wheels) w.rotation.z -= this.carSpeed * 0.03;
+    if (this.mode === "drive") {
+      this.avatar.visible = false;
+    } else {
+      this.avatar.visible = true;
+      this.avatar.position.set(this.x, 0, this.z);
+      this.avatar.rotation.y = this.angle + Math.PI / 2;
+      animatePerson(this.avatar, t, this.speed > 0 ? 1 : 0);
+    }
   }
-}
-
-export function animateWalk(human, phase, amount) {
-  const p = human.userData.parts;
-  p.legL.hip.rotation.x = Math.sin(phase) * 0.62 * amount;
-  p.legR.hip.rotation.x = -Math.sin(phase) * 0.62 * amount;
-  p.legL.kn.rotation.x = Math.max(0, -Math.sin(phase)) * 0.7 * amount;
-  p.legR.kn.rotation.x = Math.max(0, Math.sin(phase)) * 0.7 * amount;
-  if (!human.userData.aiming) {
-    p.armL.sh.rotation.x = -Math.sin(phase) * 0.5 * amount;
-    p.armR.sh.rotation.x = Math.sin(phase) * 0.5 * amount;
+  camera(camera) {
+    if (this.mode === "drive") {
+      // Rendah-dekat: hero besar memenuhi bawah frame, jalan terbentang.
+      const back = 8.2, up = 2.45;
+      const fx = Math.cos(this.carAngle), fz = -Math.sin(this.carAngle);
+      camera.position.set(this.carX - fx * back, up, this.carZ - fz * back);
+      camera.lookAt(this.carX + fx * 9, 1.15, this.carZ + fz * 9);
+    } else {
+      camera.position.set(this.x - Math.cos(this.angle) * 7.5, 3.1, this.z + Math.sin(this.angle) * 7.5);
+      camera.lookAt(this.x + Math.cos(this.angle) * 6, 1.4, this.z - Math.sin(this.angle) * 6);
+    }
   }
-  p.hips.position.y = 0.98 + Math.abs(Math.sin(phase)) * 0.045 * amount;
-}
-
-export function createPlayer(state) {
-  const mesh = buildHuman({ shirt: 0x2f6fd0, pants: 0x232838, hat: 0x1f2733, skin: skinTones[0] });
-  mesh.position.set(4, 0, 30);
-  state.world.scene.add(mesh);
-  return {
-    mesh, pos: mesh.position, heading: Math.PI, speed: 0, walkPhase: 0,
-    health: 100, armor: 0, weaponIndex: 0, car: null, dead: false,
-  };
-}
-
-export function updatePlayer(state, dt) {
-  const p = state.player;
-  if (p.car || state.staged) return;
-  const k = state.input.keys;
-  let mx = 0, mz = 0;
-  if (k[CONFIG.keys.forward]) mz -= 1;
-  if (k[CONFIG.keys.back]) mz += 1;
-  if (k[CONFIG.keys.left]) mx -= 1;
-  if (k[CONFIG.keys.right]) mx += 1;
-  const moving = (mx !== 0 || mz !== 0);
-  const run = k["ShiftLeft"] || k["ShiftRight"];
-  const sp = run ? CONFIG.playerRunSpeed : CONFIG.playerSpeed;
-  if (moving) {
-    const len = Math.hypot(mx, mz); mx /= len; mz /= len;
-    const camYaw = state.camYaw || 0;
-    const sin = Math.sin(camYaw), cos = Math.cos(camYaw);
-    const wx = mx * cos - mz * sin, wz = mx * sin + mz * cos;
-    p.pos.x = THREE.MathUtils.clamp(p.pos.x + wx * sp * dt, -205, 205);
-    p.pos.z = THREE.MathUtils.clamp(p.pos.z + wz * sp * dt, -205, 205);
-    p.heading = Math.atan2(wx, wz);
-    p.walkPhase += dt * (run ? 13 : 9.5);
-    p.speed = sp;
-  } else p.speed = 0;
-  p.mesh.position.copy(p.pos);
-  p.mesh.rotation.y = p.heading;
-  animateWalk(p.mesh, p.walkPhase, moving ? 1 : 0);
-  state.camYaw = p.heading + Math.PI;
 }

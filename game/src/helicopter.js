@@ -1,103 +1,76 @@
-// Helikopter polisi GARUDA-1: badan membulat, rotor blur, kerucut sorot lembut.
-import "three";
-const THREE = window.THREE;
+// helicopter.js — helikopter polisi bermodel: badan membulat, kaca kabin,
+// boom ekor, rotor utama dan ekor berputar, skid, lampu strobo, dan kerucut
+// sorot cahaya yang mengikuti pemain.
+import { canvasTexture } from "./city.js";
 
-export function createHelicopter(state) {
-  const g = new THREE.Group();
-  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x2c3e5e, roughness: 0.32, metalness: 0.55 });
-  const body = new THREE.Mesh(new THREE.SphereGeometry(1.45, 22, 16), bodyMat);
-  body.scale.set(1, 0.82, 1.55); body.castShadow = true; g.add(body);
-  const cockpit = new THREE.Mesh(new THREE.SphereGeometry(0.95, 18, 12),
-    new THREE.MeshPhysicalMaterial({ color: 0x9fd4ff, roughness: 0.05, metalness: 0.3, clearcoat: 1, transparent: true, opacity: 0.75 }));
-  cockpit.scale.set(0.9, 0.72, 0.9); cockpit.position.set(0, 0.12, 1.05); g.add(cockpit);
-  const stripe = new THREE.Mesh(new THREE.TorusGeometry(1.32, 0.09, 8, 24), new THREE.MeshStandardMaterial({ color: 0xf2b821, roughness: 0.4 }));
-  stripe.rotation.x = Math.PI / 2; stripe.scale.set(1, 1.4, 1); g.add(stripe);
-  const tail = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.34, 4.6, 10), bodyMat);
-  tail.rotation.x = Math.PI / 2 - 0.06; tail.position.set(0, 0.22, -3.4); g.add(tail);
-  const fin = new THREE.Mesh(new THREE.BoxGeometry(0.08, 1.05, 0.6), bodyMat);
-  fin.position.set(0, 0.55, -5.6); g.add(fin);
-  const tailRotor = new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.62, 0.05, 18),
-    new THREE.MeshBasicMaterial({ color: 0x222630, transparent: true, opacity: 0.55, side: THREE.DoubleSide }));
-  tailRotor.rotation.z = Math.PI / 2; tailRotor.position.set(0.18, 0.55, -5.6); g.add(tailRotor);
-  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.14, 0.5, 8), bodyMat);
-  mast.position.y = 1.25; g.add(mast);
-  const rotor = new THREE.Mesh(new THREE.CylinderGeometry(4.6, 4.6, 0.03, 28),
-    new THREE.MeshBasicMaterial({ color: 0x1c202a, transparent: true, opacity: 0.34, side: THREE.DoubleSide }));
-  rotor.position.y = 1.52; g.add(rotor);
-  const rotorHub = new THREE.Mesh(new THREE.SphereGeometry(0.24, 10, 8), bodyMat);
-  rotorHub.position.y = 1.5; g.add(rotorHub);
-  for (const sx of [-1, 1]) {
-    const skidPost = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.7, 6), bodyMat);
-    skidPost.position.set(sx * 0.8, -1.05, 0.5); g.add(skidPost);
-    const skidPost2 = skidPost.clone(); skidPost2.position.z = -0.7; g.add(skidPost2);
-    const skid = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 2.6, 6), bodyMat);
-    skid.rotation.x = Math.PI / 2; skid.position.set(sx * 0.8, -1.4, -0.1); g.add(skid);
+export function makeHelicopter() {
+  const T3 = window.THREE;
+  const heli = new T3.Group();
+  const bodyMat = new T3.MeshPhongMaterial({ color: 0x1e3a5f, shininess: 70, specular: 0x88aacc });
+  const body = new T3.Mesh(new T3.SphereGeometry(1.5, 16, 12), bodyMat);
+  body.scale.set(1.5, 0.95, 0.9); body.castShadow = true;
+  heli.add(body);
+  const nose = new T3.Mesh(new T3.SphereGeometry(1.05, 14, 10),
+    new T3.MeshPhongMaterial({ color: 0x9fd4f2, shininess: 130, specular: 0xffffff }));
+  nose.position.set(1.45, 0.08, 0); nose.scale.set(0.9, 0.8, 0.85);
+  heli.add(nose);
+  const stripe = new T3.Mesh(new T3.BoxGeometry(3.4, 0.3, 2.0), new T3.MeshBasicMaterial({ color: 0xf8fafc }));
+  stripe.position.set(-0.2, -0.25, 0); heli.add(stripe);
+  const boom = new T3.Mesh(new T3.CylinderGeometry(0.22, 0.4, 4.6, 8), bodyMat);
+  boom.rotation.z = Math.PI / 2 - 0.06; boom.position.set(-3.6, 0.35, 0);
+  heli.add(boom);
+  const fin = new T3.Mesh(new T3.BoxGeometry(0.16, 1.5, 0.7), new T3.MeshBasicMaterial({ color: 0xdc2626 }));
+  fin.position.set(-5.85, 0.85, 0); heli.add(fin);
+  const tailRotor = new T3.Mesh(new T3.BoxGeometry(0.08, 1.7, 0.18), new T3.MeshBasicMaterial({ color: 0x22262c }));
+  tailRotor.position.set(-5.85, 0.85, 0.45); heli.add(tailRotor);
+  const mast = new T3.Mesh(new T3.CylinderGeometry(0.14, 0.14, 0.6, 8), bodyMat);
+  mast.position.y = 1.55; heli.add(mast);
+  const rotor = new T3.Group();
+  for (const rz of [0, Math.PI / 2]) {
+    const blade = new T3.Mesh(new T3.BoxGeometry(11.5, 0.06, 0.5), new T3.MeshBasicMaterial({ color: 0x1f2937 }));
+    blade.rotation.y = rz; rotor.add(blade);
   }
-  const navR = new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 8), new THREE.MeshBasicMaterial({ color: 0xff2438 }));
-  navR.position.set(-1.3, 0, 0.2); g.add(navR);
-  const navG = new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 8), new THREE.MeshBasicMaterial({ color: 0x2aff7a }));
-  navG.position.set(1.3, 0, 0.2); g.add(navG);
-
-  // Kerucut sorot lembut + kolam cahaya kecil dan hangat di tanah.
-  const coneMat = new THREE.MeshBasicMaterial({
-    color: 0xffeec2, transparent: true, opacity: 0.13, blending: THREE.AdditiveBlending,
-    depthWrite: false, side: THREE.DoubleSide, fog: false,
+  rotor.position.y = 1.9; heli.add(rotor);
+  for (const s of [-1, 1]) {
+    const skid = new T3.Mesh(new T3.CylinderGeometry(0.07, 0.07, 3.6, 6), new T3.MeshStandardMaterial({ color: 0xd7dde3, metalness: 0.7, roughness: 0.35 }));
+    skid.rotation.z = Math.PI / 2; skid.position.set(0, -1.55, s * 1.05); heli.add(skid);
+    const strut = new T3.Mesh(new T3.CylinderGeometry(0.06, 0.06, 0.8, 6), skid.material);
+    strut.position.set(0.7, -1.2, s * 0.9); strut.rotation.x = s * 0.4; heli.add(strut);
+  }
+  const strobe = new T3.Mesh(new T3.SphereGeometry(0.14, 8, 8), new T3.MeshBasicMaterial({ color: 0xff3333 }));
+  strobe.position.set(-5.85, 1.7, 0); heli.add(strobe);
+  // Kerucut sorot: transparan aditif, melebar ke tanah.
+  const coneTex = canvasTexture(64, 128, (g, w, h) => {
+    const grad = g.createLinearGradient(0, 0, 0, h);
+    grad.addColorStop(0, "rgba(255,246,200,0.85)");
+    grad.addColorStop(1, "rgba(255,246,200,0.05)");
+    g.fillStyle = grad; g.fillRect(0, 0, w, h);
   });
-  const cone = new THREE.Mesh(new THREE.ConeGeometry(4.6, 26, 24, 1, true), coneMat);
-  cone.position.y = -13.4; g.add(cone);
-  const pool = new THREE.Mesh(new THREE.CircleGeometry(2.6, 22),
-    new THREE.MeshBasicMaterial({ color: 0xffe9bb, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending, depthWrite: false }));
-  pool.rotation.x = -Math.PI / 2; pool.position.y = 0.06; state.world.scene.add(pool);
-
-  g.position.set(30, 26, -40);
-  g.visible = false;
-  state.world.scene.add(g);
-  return {
-    mesh: g, pos: g.position, rotor, tailRotor, pool, cone,
-    target: new THREE.Vector3(), mode: "off", angle: 0, name: "GARUDA-1",
-  };
+  const cone = new T3.Mesh(new T3.ConeGeometry(3.8, 16, 20, 1, true),
+    new T3.MeshBasicMaterial({ map: coneTex, transparent: true, opacity: 0.1, blending: T3.AdditiveBlending, depthWrite: false, side: T3.DoubleSide }));
+  cone.position.set(0.6, -9.2, 0);
+  heli.add(cone);
+  const pool = new T3.Mesh(new T3.CircleGeometry(4.6, 20),
+    new T3.MeshBasicMaterial({ color: 0xfff2b8, transparent: true, opacity: 0.18, blending: T3.AdditiveBlending, depthWrite: false }));
+  pool.rotation.x = -Math.PI / 2;
+  heli.add(pool);
+  heli.userData = { rotor, tailRotor, cone, pool, strobe };
+  return heli;
 }
 
-export function updateHelicopter(state, dt) {
-  const h = state.heli;
-  const active = state.wanted >= 3;
-  h.mesh.visible = active || state.staged === "chase";
-  if (!h.mesh.visible) { h.pool.visible = false; return; }
-  h.pool.visible = true;
-  h.mode = "pursuit";
-  h.angle += dt * 0.55;
-  if (state.staged === "chase") {
-    h.pos.x += (6.5 - h.pos.x) * Math.min(1, dt * 2);
-    h.pos.z += (-15 - h.pos.z) * Math.min(1, dt * 2);
-    h.pos.y = 16.5 + Math.sin(performance.now() / 700) * 0.5;
-    h.mesh.lookAt(0, 0, 10);
-    h.rotor.rotation.y += dt * 26;
-    h.tailRotor.rotation.x += dt * 32;
-    h.pool.position.set(3, 0.06, 5);
-    h.pool.material.opacity = 0.2;
-    return;
-  }
-  if (state.staged === "shootout") {
-    h.pos.x += (-11 - h.pos.x) * Math.min(1, dt * 2);
-    h.pos.z += (86 - h.pos.z) * Math.min(1, dt * 2);
-    h.pos.y = 19 + Math.sin(performance.now() / 800) * 0.5;
-    h.mesh.lookAt(0, 0, 100);
-    h.rotor.rotation.y += dt * 26;
-    h.tailRotor.rotation.x += dt * 32;
-    h.pool.position.set(-2, 0.06, 97);
-    h.pool.material.opacity = 0.15;
-    return;
-  }
-  const anchor = state.player.pos;
-  const tx = anchor.x + Math.cos(h.angle) * 13;
-  const tz = anchor.z + Math.sin(h.angle) * 13 - 6;
-  h.pos.x += (tx - h.pos.x) * Math.min(1, dt * 1.6);
-  h.pos.z += (tz - h.pos.z) * Math.min(1, dt * 1.6);
-  h.pos.y = 24 + Math.sin(h.angle * 2.3) * 1.1;
-  h.mesh.lookAt(anchor.x, 0, anchor.z);
-  h.rotor.rotation.y += dt * 26;
-  h.tailRotor.rotation.x += dt * 32;
-  h.pool.position.set(anchor.x + 2.5, 0.06, anchor.z - 3.5);
-  const flicker = 0.26 + Math.sin(performance.now() / 90) * 0.03;
-  h.pool.material.opacity = flicker;
+export function updateHelicopter(heli, target, t, dt) {
+  const u = heli.userData;
+  const orbitR = 15;
+  const hx = target.x + Math.cos(t * 0.35) * orbitR;
+  const hz = target.z + Math.sin(t * 0.35) * orbitR;
+  heli.position.x += (hx - heli.position.x) * Math.min(1, dt * 1.6);
+  heli.position.z += (hz - heli.position.z) * Math.min(1, dt * 1.6);
+  heli.position.y = 17.5 + Math.sin(t * 0.9) * 0.7;
+  heli.rotation.y = -Math.atan2(hx - target.x, hz - target.z) + Math.PI / 2 + Math.PI;
+  heli.rotation.z = 0.1;
+  u.rotor.rotation.y = t * 14;
+  u.tailRotor.rotation.x = t * 22;
+  u.strobe.material.color.setHex(Math.sin(t * 7) > 0 ? 0xff3333 : 0x550000);
+  // Kolam sorot menempel di tanah tepat di bawah kerucut, mengikuti pemain.
+  u.pool.position.set(target.x - heli.position.x, -heli.position.y + 0.12, target.z - heli.position.z);
 }

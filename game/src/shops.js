@@ -1,57 +1,42 @@
-// Toko senjata, garasi upgrade, safehouse, rumah sakit, kantor polisi.
-import "three";
-const THREE = window.THREE;
-import { showDialog, showBanner } from "./hud.js";
-import { playSound } from "./audio.js";
+// shops.js — garasi (upgrade mesin, NOS, cat), toko senjata, toko pakaian,
+// warung makan pemulih HP. Interaksi dengan tombol E di dekat toko.
+import { SHOPS } from "./config.js";
 
-export function createShops(state) {
-  const spots = [
-    { kind: "gun", name: "Toko Senjata Berkah", at: state.city.pois.gunShop, color: 0xff7847 },
-    { kind: "garage", name: "Garasi Bimo", at: state.city.pois.garage, color: 0x39c2ff },
-    { kind: "safehouse", name: "Safehouse Perumahan", at: state.city.pois.safehouse, color: 0x3ce06a },
-    { kind: "hospital", name: "Rumah Sakit Teluk", at: state.city.pois.hospital, color: 0xff5f7a },
-    { kind: "police", name: "Kantor Polisi", at: state.city.pois.policeStation, color: 0x7ab8ff },
-  ];
-  for (const s of spots) {
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(1.7, 0.13, 8, 22),
-      new THREE.MeshBasicMaterial({ color: s.color }));
-    ring.rotation.x = Math.PI / 2;
-    ring.position.set(s.at.x, 0.25, s.at.z);
-    state.world.scene.add(ring);
-    s.ring = ring;
+export class Shops {
+  constructor(player, combat) {
+    this.list = SHOPS;
+    this.player = player;
+    this.combat = combat;
+    this.clothesIdx = 0;
+    this.paintIdx = 0;
+    this.notice = "";
   }
-  return { spots, near: null, armorLevel: 0, engineLevel: 0, dialogCd: 0 };
-}
-
-export function updateShops(state, dt) {
-  const sh = state.shopState;
-  sh.dialogCd = Math.max(0, sh.dialogCd - dt);
-  sh.near = null;
-  for (const s of sh.spots) {
-    s.ring.rotation.z += dt * 0.8;
-    if (state.player.pos.distanceTo(s.at) < 4.2) sh.near = s;
+  nearest() {
+    let best = null, bestD = 9;
+    for (const s of this.list) {
+      const d = Math.hypot(this.player.x - s.x, this.player.z - s.z);
+      if (d < bestD) { best = s; bestD = d; }
+    }
+    return best;
   }
-  if (!sh.near || state.staged) return;
-  if (sh.dialogCd <= 0) {
-    sh.dialogCd = 4;
-    if (sh.near.kind === "gun") showDialog(state, "Penjaga Toko", "Pistol $250, shotgun $600, amunisi selalu ada. Tekan E untuk membeli pistol.");
-    else if (sh.near.kind === "garage") showDialog(state, "Bimo", "Upgrade mesin $400, armor bodi $350. Tekan E untuk upgrade mesin mobilmu.");
-    else if (sh.near.kind === "safehouse") showDialog(state, "Safehouse", "Tempat aman. Tekan E untuk menyimpan permainan.");
-    else if (sh.near.kind === "hospital") showDialog(state, "Perawat", "Tekan E untuk memulihkan health ($50).");
-    else showDialog(state, "Petugas", "Kantor Polisi Teluk Cerah. Jaga sikapmu di kota ini.");
-  }
-  if (!state.input.takePressed("KeyE")) return;
-  const kind = sh.near.kind;
-  if (kind === "gun") {
-    const w = state.combat.weapons[1];
-    if (state.cash >= 250) { state.cash -= 250; w.reserve += 36; w.ammo = w.mag; showBanner(state, "Pistol + amunisi dibeli — $250"); playSound(state, "pickup"); }
-    else showBanner(state, "Uang tidak cukup");
-  } else if (kind === "garage" && state.player.car) {
-    if (state.cash >= 400) { state.cash -= 400; state.player.car.health = 100; state.player.car.spec = { ...state.player.car.spec, topSpeed: state.player.car.spec.topSpeed + 3 }; showBanner(state, "Mesin di-upgrade + kondisi pulih — $400"); playSound(state, "mission"); }
-    else showBanner(state, "Uang tidak cukup");
-  } else if (kind === "safehouse") {
-    import("./save.js").then((m) => { if (m.saveGame(state, 1)) showBanner(state, "Permainan disimpan (slot 1)"); });
-  } else if (kind === "hospital") {
-    if (state.cash >= 50 && state.player.health < 100) { state.cash -= 50; state.player.health = 100; showBanner(state, "Health pulih — $50"); playSound(state, "pickup"); }
+  interact() {
+    const s = this.nearest();
+    if (!s) return null;
+    const p = this.player;
+    if (s.kind === "garage") {
+      if (p.engineLevel < 3 && p.money >= 300) { p.money -= 300; p.engineLevel += 1; this.notice = "Mesin naik ke level " + p.engineLevel; }
+      else if (p.nosLevel < 3 && p.money >= 200) { p.money -= 200; p.nosLevel += 1; p.nos = 100; this.notice = "NOS ditingkatkan ke level " + p.nosLevel; }
+      else this.notice = "Garasi Pelita: upgrade penuh atau uang kurang";
+    } else if (s.kind === "weapon") {
+      if (p.money >= 120) { p.money -= 120; this.combat.ammo.pistol += 24; this.combat.ammo.shotgun += 8; this.notice = "Amunisi pistol +24, shotgun +8"; }
+      else this.notice = "Toko Senjata Arus: uang kurang untuk amunisi";
+    } else if (s.kind === "clothes") {
+      this.clothesIdx = (this.clothesIdx + 1) % 4;
+      this.notice = "Butik Melati: gaya pakaian diganti (" + (this.clothesIdx + 1) + "/4)";
+    } else if (s.kind === "food") {
+      if (p.money >= 25) { p.money -= 25; p.hp = Math.min(100, p.hp + 40); this.notice = "Warung Senja: HP +40, perut kenyang"; }
+      else this.notice = "Warung Senja: uang kurang untuk makan";
+    }
+    return s;
   }
 }

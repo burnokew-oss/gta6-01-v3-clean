@@ -1,34 +1,41 @@
-// Radio tiga stasiun orisinal; berganti lagu seiring waktu, tombol R di mobil mengganti stasiun.
-import { CONFIG } from "./config.js";
-import { playSound } from "./audio.js";
+// radio.js — 3 stasiun radio prosedural: loop synth orisinal WebAudio,
+// nama stasiun dan judul lagu tampil di HUD, ganti stasiun dengan R.
+import { RADIO_STATIONS } from "./config.js";
 
-export function createRadio(state) {
-  return { station: 0, songIndex: 0, songTimer: 0, playing: true };
-}
+const SCALES = [
+  [220, 261.6, 329.6, 392, 329.6, 261.6],
+  [196, 246.9, 293.7, 392, 293.7, 246.9],
+  [174.6, 220, 261.6, 349.2, 261.6, 220],
+];
 
-export function currentStation(state) {
-  return CONFIG.radioStations[state.radioState.station];
-}
-
-export function currentSong(state) {
-  const st = currentStation(state);
-  return st.songs[state.radioState.songIndex % st.songs.length];
-}
-
-export function nextStation(state) {
-  const r = state.radioState;
-  r.station = (r.station + 1) % CONFIG.radioStations.length;
-  r.songIndex = 0; r.songTimer = 0;
-  playSound(state, "radio");
-}
-
-export function updateRadio(state, dt) {
-  const r = state.radioState;
-  if (!state.player.car) return;
-  r.songTimer += dt;
-  if (r.songTimer > 30) {
-    r.songTimer = 0;
-    const st = currentStation(state);
-    r.songIndex = (r.songIndex + 1) % st.songs.length;
+export class Radio {
+  constructor(audio) {
+    this.stations = RADIO_STATIONS;
+    this.idx = 0;
+    this.trackIdx = 0;
+    this.audio = audio;
+    this.step = 0;
+    this.timer = 0;
+    this.playing = false;
+  }
+  get station() { return this.stations[this.idx]; }
+  get track() { return this.station.tracks[this.trackIdx % this.station.tracks.length]; }
+  next() {
+    this.idx = (this.idx + 1) % this.stations.length;
+    this.trackIdx = 0; this.step = 0;
+  }
+  start() { this.playing = true; }
+  update(dt) {
+    if (!this.playing || !this.audio.ctx) return;
+    this.timer -= dt;
+    if (this.timer <= 0) {
+      this.timer = 0.24;
+      const scale = SCALES[this.idx];
+      const note = scale[this.step % scale.length];
+      this.audio.tone(note, 0.2, "triangle", 0.05);
+      if (this.step % 4 === 0) this.audio.tone(note / 2, 0.4, "sine", 0.07);
+      this.step += 1;
+      if (this.step % 24 === 0) this.trackIdx += 1;
+    }
   }
 }
