@@ -1,90 +1,115 @@
-// missions.js — 10 misi cerita berurutan: objektif bertahap, dialog HUD,
-// penanda cahaya, hadiah uang dan reputasi.
+// Teluk Cerah — the ten-mission story chain for Raka: staged objectives
+// with a world marker, short dialogue beats, cash and reputation rewards,
+// plus race checkpoints and a courier chase.
+
 import { MISSIONS } from "./config.js";
 
-const STAGE_SETS = [
-  ["Ambil mobil pinjaman di garasi", "Antar mobil ke Warung Senja"],
-  ["Curi van roti di Toko Roti Matahari", "Antar van ke Pasar Ikan sebelum dingin"],
-  ["Kejar pencuri ke arah pelabuhan", "Hentikan kendaraannya"],
-  ["Rampok toko emas di Pusat Cerah", "Kabur sampai bintang wanted padam"],
-  ["Ambil paket di kedai kopi", "Antar paket ke dermaga Kapten Bram"],
-  ["Capai gerbang balapan 1", "Menangkan balapan lewat 6 gerbang"],
-  ["Masuki gudang pelabuhan", "Kalahkan 4 penjaga gudang"],
-  ["Ambil koper di menara jam", "Antar koper ke Bukit Melati"],
-  ["Naiki atap pasar", "Capai mercusuar sebelum fajar"],
-  ["Pergi ke Pelabuhan Timur", "Rebut kapal dan berlayar pulang"],
-];
-const DIALOGS = [
-  ["Bibi Ratna", "Raka! Kau pulang juga. Mobil pinjaman ada di garasi, jangan sampai lecet."],
-  ["Pak Darma", "Vanku dicuri orang tak dikenal. Ambil kembali, rotinya untuk pasar pagi."],
-  ["Sersan Laksmi", "Pencuri perahu kabur ke pelabuhan. Kejar, tapi jangan rusak kotaku."],
-  ["Orang Asing", "Toko emas itu menyimpan uang kotor. Ambil, dan kita bagi dua."],
-  ["Kapten Bram", "Paket ini tidak boleh dibuka. Antar ke dermaga, cepat."],
-  ["Dito", "Balapan Jalan Palma, enam gerbang. Kalah, kau traktir sate sebulan."],
-  ["Bibi Ratna", "Gudang itu bukan tempatmu, tapi keluargamu terikat di sana. Hati-hati."],
-  ["Pak Darma", "Koper di menara jam. Isinya masa depan pasar ini, Raka."],
-  ["Dito", "Atap ke atap sampai mercusuar. Kota ini milik yang berani."],
-  ["Kapten Bram", "Satu pertempuran terakhir di Pelabuhan Timur. Akhiri, lalu berlayar."],
-];
-export const MISSION_SPOTS = [
-  { x: -52, z: 58 }, { x: -120, z: 92 }, { x: 150, z: 118 }, { x: 24, z: -24 },
-  { x: -70, z: 120 }, { x: 120, z: -42 }, { x: 150, z: 118 }, { x: 30, z: -30 },
-  { x: 168, z: 158 }, { x: 168, z: 118 },
-];
+export function createMissions(scene, S, deps) {
+  const { hud, combat, police, player } = deps;
+  const marker = new THREE.Group();
+  const pillar = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.6, 26, 18, 1, true),
+    new THREE.MeshBasicMaterial({ color: 0xffc93c, transparent: true, opacity: 0.30, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false }));
+  pillar.position.y = 13;
+  const ring = new THREE.Mesh(new THREE.RingGeometry(1.7, 2.3, 28),
+    new THREE.MeshBasicMaterial({ color: 0xffc93c, transparent: true, opacity: 0.85, side: THREE.DoubleSide, depthWrite: false }));
+  ring.rotation.x = -Math.PI / 2; ring.position.y = 0.12;
+  marker.add(pillar, ring);
+  marker.visible = false;
+  scene.add(marker);
 
-export class Missions {
-  constructor(scene) {
-    this.index = 0;
-    this.stage = 0;
-    this.done = 0;
-    this.active = false;
-    this.marker = new THREE.Group();
-    const beam = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.6, 26, 12, 1, true),
-      new THREE.MeshBasicMaterial({ color: 0xffd94d, transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
-    beam.position.y = 13;
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(2.2, 0.22, 8, 24),
-      new THREE.MeshBasicMaterial({ color: 0xffd94d }));
-    ring.rotation.x = Math.PI / 2; ring.position.y = 0.4;
-    this.marker.add(beam, ring);
-    this.marker.visible = false;
-    scene.add(this.marker);
-    this.raceGates = [];
-  }
-  get current() { return MISSIONS[this.index] ?? null; }
-  start() {
-    if (!this.current) return null;
-    this.active = true; this.stage = 0;
-    this.marker.visible = true;
-    this.placeMarker();
-    return { dialog: DIALOGS[this.index], objective: STAGE_SETS[this.index][0], mission: this.current };
-  }
-  placeMarker() {
-    const spot = MISSION_SPOTS[this.index];
-    const off = this.stage === 0 ? { x: 0, z: 0 } : { x: 26, z: -18 };
-    this.marker.position.set(spot.x + off.x, 0, spot.z + off.z);
-  }
-  targetPos() { return this.marker.position; }
-  update(dt, t, playerPos, ctx) {
-    if (!this.active) return null;
-    this.marker.rotation.y += dt * 0.8;
-    const d = Math.hypot(playerPos.x - this.marker.position.x, playerPos.z - this.marker.position.z);
-    if (d > 4.2) return null;
-    this.stage++;
-    if (this.stage < STAGE_SETS[this.index].length) {
-      this.placeMarker();
-      return { objective: STAGE_SETS[this.index][this.stage] };
-    }
-    const m = this.current;
-    this.active = false; this.done++;
-    this.marker.visible = false;
-    ctx.money += m.reward; ctx.rep += m.rep;
-    const finished = { mission: m, reward: m.reward, rep: m.rep };
-    this.index++;
-    return { completed: finished };
-  }
-  objectiveText() {
-    if (!this.current) return "Semua misi selesai. Teluk Cerah aman berkat Raka.";
-    if (!this.active) return `Temui pemberi misi: ${this.current.giver} — ${this.current.title}`;
-    return STAGE_SETS[this.index][this.stage];
-  }
+  const MS = {
+    index: 0, stage: 0, active: false, done: false,
+    racePoint: 0, raceTime: 0, chaseHold: 0, courier: null,
+    get current() { return MISSIONS[MS.index]; },
+    get stageDef() { return MS.current?.stages[MS.stage]; },
+    objectiveText() {
+      if (MS.done) return "Semua misi selesai — kota ini milikmu.";
+      if (!MS.active) return "";
+      const s = MS.stageDef;
+      if (!s) return "";
+      if (s.type === "race") return `${s.text} — titik ${MS.racePoint + 1}/${s.points.length}`;
+      return s.text;
+    },
+    start(i) {
+      MS.index = i; MS.stage = 0; MS.active = true; MS.done = false;
+      MS.racePoint = 0; MS.raceTime = 0; MS.chaseHold = 0;
+      const m = MS.current;
+      hud.showDialogue(m.giver, m.intro, 6);
+      hud.notify(`MISI ${i + 1}: ${m.title}`);
+      MS.beginStage();
+    },
+    beginStage() {
+      const s = MS.stageDef;
+      if (!s) return MS.finish();
+      if (s.wanted) police.setWanted(Math.max(police.wanted, s.wanted));
+      if (s.type === "combat") combat.spawnEnemies(s.x, s.z, s.count);
+      if (s.type === "race") { MS.racePoint = 0; MS.raceTime = 0; }
+      if (s.type === "chase") MS.spawnCourier(s);
+      MS.moveMarker();
+    },
+    moveMarker() {
+      const s = MS.stageDef;
+      if (!s) { marker.visible = false; return; }
+      const p = s.type === "race" ? { x: s.points[MS.racePoint][0], z: s.points[MS.racePoint][1] } : s;
+      marker.position.set(p.x, 0, p.z);
+      marker.visible = true;
+    },
+    spawnCourier(s) {
+      const c = deps.makeCourier(s.x, s.z);
+      MS.courier = c;
+    },
+    finish() {
+      const m = MS.current;
+      S.money += m.reward; S.rep += m.rep;
+      hud.notify(`MISI SELESAI: ${m.title}  +$${m.reward}  +${m.rep} reputasi`);
+      hud.showDialogue(m.giver, "Kerja bagus, Raka. Kota ini mulai bicara tentangmu.", 5);
+      deps.audio?.coin();
+      MS.active = false;
+      marker.visible = false;
+      if (MS.index + 1 < MISSIONS.length) {
+        setTimeout(() => MS.start(MS.index + 1), 4000);
+      } else {
+        MS.done = true;
+        hud.notify("CERITA SELESAI — Teluk Cerah tamat. Tetaplah berkeliaran!");
+      }
+    },
+    advance() {
+      MS.stage += 1;
+      combat.clearEnemies();
+      if (MS.stage >= MS.current.stages.length) MS.finish();
+      else MS.beginStage();
+    },
+    update(dt, t) {
+      if (!MS.active) return;
+      const s = MS.stageDef;
+      if (!s) return;
+      ring.scale.setScalar(1 + Math.sin(t * 3.2) * 0.10);
+      pillar.material.opacity = 0.24 + Math.sin(t * 2.4) * 0.08;
+      const d = Math.hypot(player.x - (s.x ?? 0), player.z - (s.z ?? 0));
+      if (s.type === "goto" && d < 4.2) MS.advance();
+      else if (s.type === "combat" && combat.aliveCount() === 0) MS.advance();
+      else if (s.type === "race") {
+        MS.raceTime += dt;
+        const [rx, rz] = s.points[MS.racePoint];
+        marker.position.set(rx, 0, rz);
+        if (Math.hypot(player.x - rx, player.z - rz) < 7) {
+          MS.racePoint += 1;
+          deps.audio?.coin();
+          if (MS.racePoint >= s.points.length) MS.advance();
+          else MS.moveMarker();
+        }
+      } else if (s.type === "chase" && MS.courier) {
+        const c = MS.courier;
+        c.update(dt, player);
+        if (Math.hypot(player.x - c.x, player.z - c.z) < 6.5) {
+          MS.chaseHold += dt;
+          if (MS.chaseHold > 1.4) { MS.courier = null; MS.advance(); }
+        } else MS.chaseHold = Math.max(0, MS.chaseHold - dt);
+      }
+    },
+    // screenshot helper: park the marker on a point without a live mission
+    setShotMarker(x, z) { marker.position.set(x, 0, z); marker.visible = true; },
+    markerPos() { return marker.visible ? { x: marker.position.x, z: marker.position.z } : null; },
+  };
+  return MS;
 }

@@ -1,97 +1,171 @@
-// render.js — renderer Three.js: langit gradien senja jenuh, matahari
-// hangat, kabut tipis, bayangan lembut, grading jenuh dengan gelap sejati
-// dan terang sejati di tiap frame. Siklus cahaya selalu terang.
-import { Rng } from "./random.js";
+// Teluk Cerah — renderer and atmosphere: real shadow mapping with soft
+// edges, a saturated golden-hour sky, warm distance fog, ACES filmic tone
+// mapping, and a procedural sunset environment map so PBR materials pick
+// up the sky's colours and vehicles sit inside the world.
 
-export function makeCanvas(w, h, draw) {
-  const c = document.createElement("canvas");
-  c.width = w; c.height = h;
-  draw(c.getContext("2d"), w, h);
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 4;
-  return tex;
-}
+export function createStage(canvas) {
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.12;
+  renderer.outputEncoding = THREE.sRGBEncoding;
 
-export function skyTexture() {
-  return makeCanvas(64, 512, (g, w, h) => {
-    const grad = g.createLinearGradient(0, 0, 0, h);
-    grad.addColorStop(0.0, "#0d5f73");
-    grad.addColorStop(0.35, "#1b93a8");
-    grad.addColorStop(0.62, "#f7b733");
-    grad.addColorStop(0.8, "#ff8c42");
-    grad.addColorStop(1.0, "#ff6b4a");
-    g.fillStyle = grad; g.fillRect(0, 0, w, h);
-  });
-}
+  const scene = new THREE.Scene();
+  scene.fog = new THREE.Fog(0xe99a5c, 150, 780);
 
-export class Render {
-  constructor(canvas) {
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio, 1.6));
-    this.renderer.setSize(innerWidth, innerHeight);
-    this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.22;
-    this.scene = new THREE.Scene();
-    this.scene.fog = new THREE.Fog(0xf6b183, 130, 430);
-    this.camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.1, 900);
-    this.camera.position.set(0, 3, 12);
+  const camera = new THREE.PerspectiveCamera(58, 16 / 10, 0.1, 1600);
+  camera.position.set(0, 3, 10);
 
-    const sky = new THREE.Mesh(
-      new THREE.SphereGeometry(820, 24, 16),
-      new THREE.MeshBasicMaterial({ map: skyTexture(), side: THREE.BackSide, fog: false })
+  // ---- sky dome: layered gradient, teal zenith to peach horizon ----
+  const skyCanvas = document.createElement("canvas");
+  skyCanvas.width = 64; skyCanvas.height = 512;
+  const sg = skyCanvas.getContext("2d");
+  const grad = sg.createLinearGradient(0, 0, 0, 512);
+  grad.addColorStop(0.0, "#17456e");
+  grad.addColorStop(0.34, "#2f6ea6");
+  grad.addColorStop(0.55, "#5f9ec4");
+  grad.addColorStop(0.72, "#f2c078");
+  grad.addColorStop(0.86, "#ff9e57");
+  grad.addColorStop(1.0, "#ff8a4a");
+  sg.fillStyle = grad; sg.fillRect(0, 0, 64, 512);
+  const skyTex = new THREE.CanvasTexture(skyCanvas);
+  skyTex.encoding = THREE.sRGBEncoding;
+  const sky = new THREE.Mesh(
+    new THREE.SphereGeometry(1100, 32, 20),
+    new THREE.MeshBasicMaterial({ map: skyTex, side: THREE.BackSide, fog: false })
+  );
+  scene.add(sky);
+
+  // ---- sun + soft shadows, one consistent direction everywhere ----
+  const sunDir = new THREE.Vector3(0.55, 0.33, 0.30).normalize();
+  const sun = new THREE.DirectionalLight(0xffd9a3, 1.32);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(1536, 1536);
+  sun.shadow.camera.left = -95; sun.shadow.camera.right = 95;
+  sun.shadow.camera.top = 95; sun.shadow.camera.bottom = -95;
+  sun.shadow.camera.near = 10; sun.shadow.camera.far = 420;
+  sun.shadow.bias = -0.0006;
+  sun.shadow.normalBias = 0.03;
+  scene.add(sun); scene.add(sun.target);
+
+  const hemi = new THREE.HemisphereLight(0xa8cdea, 0x9a6136, 0.55);
+  scene.add(hemi);
+  const bounce = new THREE.DirectionalLight(0xff9e57, 0.28);
+  bounce.position.set(120, 30, -160);
+  scene.add(bounce);
+
+  // ---- environment reflections baked from the same sunset ----
+  const envMap = buildSunsetEnvMap(renderer);
+  scene.environment = envMap;
+
+  // sun glow billboard
+  const glowCanvas = document.createElement("canvas");
+  glowCanvas.width = glowCanvas.height = 128;
+  const gg = glowCanvas.getContext("2d");
+  const rg = gg.createRadialGradient(64, 64, 2, 64, 64, 64);
+  rg.addColorStop(0, "rgba(255,244,214,1)");
+  rg.addColorStop(0.25, "rgba(255,205,130,0.75)");
+  rg.addColorStop(1, "rgba(255,160,80,0)");
+  gg.fillStyle = rg; gg.fillRect(0, 0, 128, 128);
+  const glowTex = new THREE.CanvasTexture(glowCanvas);
+  const sunSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, fog: false, depthWrite: false, transparent: true }));
+  sunSprite.scale.set(340, 340, 1);
+  sunSprite.position.copy(sunDir).multiplyScalar(980);
+  scene.add(sunSprite);
+
+  // thin drifting clouds: soft white ellipses on transparent planes
+  const clouds = new THREE.Group();
+  const cloudTex = makeCloudTexture();
+  for (let i = 0; i < 14; i++) {
+    const m = new THREE.Mesh(
+      new THREE.PlaneGeometry(150 + (i % 4) * 60, 26 + (i % 3) * 10),
+      new THREE.MeshBasicMaterial({ map: cloudTex, transparent: true, opacity: 0.5, depthWrite: false, fog: false })
     );
-    this.scene.add(sky);
+    m.position.set(-700 + i * 105, 150 + (i % 5) * 26, -320 + (i % 4) * 130);
+    m.rotation.x = -0.12;
+    clouds.add(m);
+  }
+  scene.add(clouds);
 
-    this.sun = new THREE.DirectionalLight(0xffd9a3, 2.6);
-    this.sun.position.set(120, 150, -60);
-    this.sun.castShadow = true;
-    this.sun.shadow.mapSize.set(2048, 2048);
-    this.sun.shadow.camera.left = -150; this.sun.shadow.camera.right = 150;
-    this.sun.shadow.camera.top = 150; this.sun.shadow.camera.bottom = -150;
-    this.sun.shadow.camera.far = 500;
-    this.sun.shadow.bias = -0.0006;
-    this.scene.add(this.sun, this.sun.target);
-    this.scene.add(new THREE.HemisphereLight(0xffe3b8, 0x2e4453, 0.95));
-    this.scene.add(new THREE.AmbientLight(0xffc9a0, 0.35));
+  function followShadow(target) {
+    sun.position.copy(target).addScaledVector(sunDir, 190);
+    sun.target.position.copy(target);
+  }
 
-    // Awan tipis bergerak perlahan.
-    this.clouds = new THREE.Group();
-    const rng = new Rng(777);
-    const cloudTex = makeCanvas(256, 128, (g, w, h) => {
-      g.clearRect(0, 0, w, h);
-      for (let i = 0; i < 26; i++) {
-        const x = rng.float(30, w - 30), y = rng.float(35, h - 35), r = rng.float(16, 44);
-        const rg = g.createRadialGradient(x, y, 2, x, y, r);
-        rg.addColorStop(0, "rgba(255,244,230,0.55)");
-        rg.addColorStop(1, "rgba(255,244,230,0)");
-        g.fillStyle = rg; g.beginPath(); g.arc(x, y, r, 0, 7); g.fill();
-      }
+  function update(dt, t) {
+    clouds.children.forEach((c, i) => {
+      c.position.x += dt * (1.1 + (i % 3) * 0.4);
+      if (c.position.x > 820) c.position.x = -820;
     });
-    for (let i = 0; i < 9; i++) {
-      const m = new THREE.Mesh(
-        new THREE.PlaneGeometry(rng.float(120, 220), rng.float(36, 60)),
-        new THREE.MeshBasicMaterial({ map: cloudTex, transparent: true, depthWrite: false, fog: false, opacity: 0.85 })
-      );
-      m.position.set(rng.float(-380, 380), rng.float(95, 150), rng.float(-380, 380));
-      m.rotation.x = -Math.PI / 2 + 0.25;
-      this.clouds.add(m);
+    sky.position.copy(camera.position);
+    sunSprite.position.copy(camera.position).addScaledVector(sunDir, 980);
+  }
+
+  function resize() {
+    const w = window.innerWidth, h = window.innerHeight;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+  }
+  window.addEventListener("resize", resize);
+  resize();
+
+  return { renderer, scene, camera, sun, sunDir, envMap, followShadow, update, resize };
+}
+
+function buildSunsetEnvMap(renderer) {
+  const faces = [];
+  for (let f = 0; f < 6; f++) {
+    const c = document.createElement("canvas");
+    c.width = 128; c.height = 128;
+    const g = c.getContext("2d");
+    const grad = g.createLinearGradient(0, 0, 0, 128);
+    if (f === 4) { grad.addColorStop(0, "#2c5f8f"); grad.addColorStop(1, "#7fb0c9"); }
+    else if (f === 5) { grad.addColorStop(0, "#5a3a26"); grad.addColorStop(1, "#33241a"); }
+    else {
+      grad.addColorStop(0, "#2c5f8f"); grad.addColorStop(0.52, "#8fb8cf");
+      grad.addColorStop(0.72, "#ffc078"); grad.addColorStop(1, "#7a4a30");
     }
-    this.scene.add(this.clouds);
+    g.fillStyle = grad; g.fillRect(0, 0, 128, 128);
+    if (f === 0) { // sun blob on the +x face
+      const rg = g.createRadialGradient(88, 66, 2, 88, 66, 46);
+      rg.addColorStop(0, "rgba(255,246,220,1)"); rg.addColorStop(1, "rgba(255,170,90,0)");
+      g.fillStyle = rg; g.fillRect(0, 0, 128, 128);
+    }
+    g.fillStyle = "rgba(40,32,30,0.55)";
+    for (let i = 0; i < 7; i++) g.fillRect((i * 37 + f * 11) % 128, 96, 12, 32);
+    faces.push(c);
   }
-  update(t) {
-    this.clouds.children.forEach((c, i) => {
-      c.position.x += Math.sin(t * 0.01 + i) * 0.004 + 0.012;
-      if (c.position.x > 420) c.position.x = -420;
-    });
+  const tex = new THREE.CubeTexture(faces);
+  tex.encoding = THREE.sRGBEncoding;
+  tex.needsUpdate = true;
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  // PMREM needs its own renderer target; fall back to the raw cube texture
+  // (still a valid envMap for standard/physical materials) if it fails.
+  try {
+    const rt = pmrem.fromCubemap(tex);
+    pmrem.dispose();
+    return rt.texture;
+  } catch {
+    return tex;
   }
-  render() { this.renderer.render(this.scene, this.camera); }
-  resize() {
-    this.camera.aspect = innerWidth / innerHeight;
-    this.camera.updateProjectionMatrix();
-    this.renderer.setSize(innerWidth, innerHeight);
+}
+
+function makeCloudTexture() {
+  const c = document.createElement("canvas");
+  c.width = 256; c.height = 64;
+  const g = c.getContext("2d");
+  for (let i = 0; i < 26; i++) {
+    const x = 20 + Math.random() * 216, y = 22 + Math.random() * 22, r = 12 + Math.random() * 22;
+    const rg = g.createRadialGradient(x, y, 1, x, y, r);
+    rg.addColorStop(0, "rgba(255,250,244,0.55)");
+    rg.addColorStop(1, "rgba(255,250,244,0)");
+    g.fillStyle = rg;
+    g.beginPath(); g.arc(x, y, r, 0, 7); g.fill();
   }
+  const tex = new THREE.CanvasTexture(c);
+  tex.encoding = THREE.sRGBEncoding;
+  return tex;
 }

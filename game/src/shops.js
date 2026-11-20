@@ -1,54 +1,119 @@
-// shops.js — garasi (upgrade mesin, NOS, cat), toko senjata, toko pakaian,
-// warung makan pemulih HP. Titik toko di dunia + logika beli.
-import { GARAGE_UPGRADES } from "./config.js";
+// Teluk Cerah — shops: the garage fits engine and NOS upgrades and new
+// paint, the gun shop sells the shotgun and ammunition, the boutique
+// changes Raka's outfit, and the food stall restores health.
 
-export const SHOP_POINTS = [
-  { id: "garage", name: "Garasi Bengkel Pelita", x: -52, z: 52, color: "#ffb340" },
-  { id: "weapons", name: "Toko Senjata Ombak", x: 52, z: -52, color: "#ff5964" },
-  { id: "clothes", name: "Butik Melati", x: -46, z: -58, color: "#f15bb5" },
-  { id: "food", name: "Warung Senja", x: 58, z: 46, color: "#7cff4f" },
+import { SHOPS } from "./config.js";
+
+const PAINTS = [0xc22418, 0x2e6da8, 0xe0a32e, 0x3f7a4e, 0x8a4a9e, 0x24303c, 0xe8e4da];
+const PAINT_NAMES = ["Merah Senja", "Biru Teluk", "Kuning Pasar", "Hijau Karang", "Ungu Malam", "Hitam Dermaga", "Putih Pasir"];
+const OUTFITS = [
+  { name: "Kemeja Putih + Jaket Merah", jacket: 0xb8352a },
+  { name: "Kaos Biru Laut", jacket: 0x2e6da8 },
+  { name: "Kemeja Batik Pesisir", jacket: 0x7a4a28 },
+  { name: "Jaket Kulit Hitam", jacket: 0x1c1c20 },
 ];
 
-export class Shops {
-  constructor() {
-    this.owned = new Set();
-    this.near = null;
+export function createShops(S, deps) {
+  const { player, hud, combat, audio } = deps;
+  const panel = document.getElementById("shop-panel");
+  const titleEl = document.getElementById("shop-title");
+  const itemsEl = document.getElementById("shop-items");
+  let open = null, paintIdx = 0, outfitIdx = 0;
+
+  function close() { open = null; panel.style.display = "none"; }
+  function buy(label, price, fn) {
+    const btn = document.createElement("button");
+    btn.className = "shop-item";
+    btn.textContent = `${label} — $${price}`;
+    btn.onclick = () => {
+      if (S.money < price) { hud.notify("Uang tidak cukup."); return; }
+      S.money -= price;
+      fn();
+      audio?.coin();
+      render();
+    };
+    return btn;
   }
-  update(playerPos) {
-    this.near = null;
-    for (const s of SHOP_POINTS) {
-      if (Math.hypot(playerPos.x - s.x, playerPos.z - s.z) < 5) this.near = s;
-    }
-    return this.near;
+  function free(label, fn) {
+    const btn = document.createElement("button");
+    btn.className = "shop-item";
+    btn.textContent = label;
+    btn.onclick = () => { fn(); render(); };
+    return btn;
   }
-  menuFor(shop, player, combat) {
-    if (!shop) return [];
-    if (shop.id === "garage") {
-      return GARAGE_UPGRADES.filter((u) => !this.owned.has(u.id)).map((u) => ({
-        label: `${u.name} — $${u.price}`,
-        desc: u.desc,
-        buy: () => {
-          if (player.money < u.price) return "Uang tidak cukup.";
-          player.money -= u.price; this.owned.add(u.id);
-          return `${u.name} terpasang!`;
-        },
+  function render() {
+    if (!open) return;
+    titleEl.textContent = open.name;
+    itemsEl.innerHTML = "";
+    if (open.kind === "garage") {
+      itemsEl.append(
+        buy(`Upgrade Mesin (level ${S.upgrades.engine})`, 800, () => {
+          S.upgrades.engine += 1; player.topSpeed += 3.2; player.accelPower += 1.6;
+          hud.notify("Mesin ditingkatkan!");
+        }),
+        buy(S.upgrades.nos ? "NOS Terpasang ✓" : "Pasang NOS (Shift)", 1200, () => {
+          S.upgrades.nos = true; player.nosUnlocked = true; hud.notify("NOS terpasang. Tahan Shift!");
+        }),
+        free(`Ganti Cat: ${PAINT_NAMES[paintIdx]} →`, () => {
+          paintIdx = (paintIdx + 1) % PAINTS.length;
+          player.car.paintMat.color.setHex(PAINTS[paintIdx]);
+        }),
+      );
+    } else if (open.kind === "guns") {
+      itemsEl.append(
+        buy(combat.owned.shotgun ? "Shotgun Dimiliki ✓" : "Beli Shotgun", 1500, () => {
+          combat.owned.shotgun = true; combat.switchWeapon(2); hud.notify("Shotgun dibeli!");
+        }),
+        buy("Amunisi Pistol +48", 120, () => { combat.ammo.pistol.reserve += 48; }),
+        buy("Amunisi Shotgun +18", 160, () => { combat.ammo.shotgun.reserve += 18; }),
+        buy("Rompi Armor Penuh", 500, () => { S.armor = 100; hud.notify("Armor penuh."); }),
+      );
+    } else if (open.kind === "clothes") {
+      itemsEl.append(free(`Pakaian: ${OUTFITS[outfitIdx].name} →`, () => {
+        outfitIdx = (outfitIdx + 1) % OUTFITS.length;
+        S.outfit = OUTFITS[outfitIdx].name;
+        player.figure.group.traverse((o) => {
+          if (o.isMesh && o.material && o.material.color && o.geometry && o.geometry.type === "CapsuleGeometry" && o.scale.x >= 1.13) {
+            o.material = o.material.clone();
+            o.material.color.setHex(OUTFITS[outfitIdx].jacket);
+          }
+        });
       }));
+    } else if (open.kind === "food") {
+      itemsEl.append(
+        buy("Nasi Campur Teluk (HP +45)", 60, () => { S.hp = Math.min(100, S.hp + 45); hud.notify("Perut kenyang, tenaga pulih."); }),
+        buy("Es Kelapa Muda (HP +15)", 20, () => { S.hp = Math.min(100, S.hp + 15); }),
+        buy("Kopi Tubruk (HP +25)", 35, () => { S.hp = Math.min(100, S.hp + 25); }),
+      );
     }
-    if (shop.id === "weapons") {
-      return [
-        { label: "Amunisi Pistol +30 — $60", desc: "Isi ulang pistol P9", buy: () => { if (player.money < 60) return "Uang tidak cukup."; player.money -= 60; combat.ammo.pistol += 30; return "Amunisi bertambah."; } },
-        { label: "Amunisi Shotgun +8 — $90", desc: "Isi ulang shotgun laras", buy: () => { if (player.money < 90) return "Uang tidak cukup."; player.money -= 90; combat.ammo.shotgun += 8; return "Amunisi bertambah."; } },
-        { label: "Armor Badan — $150", desc: "+50 armor", buy: () => { if (player.money < 150) return "Uang tidak cukup."; player.money -= 150; player.armor = Math.min(100, player.armor + 50); return "Armor terpasang."; } },
-      ];
-    }
-    if (shop.id === "food") {
-      return [
-        { label: "Nasi Ikan Bakar — $25", desc: "Pulihkan 40 HP", buy: () => { if (player.money < 25) return "Uang tidak cukup."; player.money -= 25; player.hp = Math.min(100, player.hp + 40); return "Segar kembali!"; } },
-        { label: "Es Teh Segar — $8", desc: "Pulihkan 12 HP", buy: () => { if (player.money < 8) return "Uang tidak cukup."; player.money -= 8; player.hp = Math.min(100, player.hp + 12); return "Dingin dan manis."; } },
-      ];
-    }
-    return [
-      { label: "Kemeja Pantai Cerah — $120", desc: "Gaya baru Raka", buy: () => { if (player.money < 120) return "Uang tidak cukup."; player.money -= 120; player.rep += 1; return "Tampilan baru! Reputasi +1."; } },
-    ];
+    const exit = document.createElement("button");
+    exit.className = "shop-item shop-exit";
+    exit.textContent = "Keluar (E)";
+    exit.onclick = close;
+    itemsEl.append(exit);
+    panel.style.display = "block";
   }
+  function openShop(shop) { open = shop; render(); }
+
+  return {
+    get isOpen() { return !!open; },
+    close,
+    update(input) {
+      if (open) {
+        if (input.hit("KeyE") || input.hit("Escape")) close();
+        return;
+      }
+      if (player.mode !== "foot" || !input.hit("KeyE")) return;
+      for (const s of SHOPS) {
+        if (Math.hypot(player.x - s.x, player.z - s.z) < 4.5) { openShop(s); return; }
+      }
+    },
+    nearestHint() {
+      if (player.mode !== "foot") return "";
+      for (const s of SHOPS) {
+        if (Math.hypot(player.x - s.x, player.z - s.z) < 4.5) return `Tekan E — ${s.name}`;
+      }
+      return "";
+    },
+  };
 }

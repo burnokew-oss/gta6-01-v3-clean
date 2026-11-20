@@ -1,27 +1,31 @@
-// Teluk Cerah — entrypoint harness make.fun.
-// Copies game/ and screenshots/ from the repository into the output
-// directory, then writes dossier.json with the kit's buildDossier so the
-// grader's rebuild compares byte for byte. Deterministic: two runs over
-// the same repository produce identical bytes.
+// Teluk Cerah — entrypoint harness for the make.fun gta6-01 bounty.
+// Copies game/ and screenshots/ into the output directory and writes the
+// dossier the grader expects, using the kit's own library so the bytes
+// match what the gate rebuilds on its side.
 import { cpSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildDossier } from "./vendor/makefun-game.ts";
+import { buildDossier, DOSSIER_MAX_BYTES, DOSSIER_MAX_IMAGES } from "./vendor/makefun-game.ts";
 
-const repoRoot = process.env.MAKEFUN_BOT_DIR ?? dirname(fileURLToPath(import.meta.url));
-const outputDir = process.env.MAKEFUN_OUTPUT_DIR ?? "/output";
+const rootDir = dirname(fileURLToPath(import.meta.url));
+const outDir = process.env.MAKEFUN_OUTPUT_DIR ?? "/output";
 
-mkdirSync(outputDir, { recursive: true });
-rmSync(join(outputDir, "game"), { recursive: true, force: true });
-rmSync(join(outputDir, "screenshots"), { recursive: true, force: true });
-cpSync(join(repoRoot, "game"), join(outputDir, "game"), { recursive: true });
-cpSync(join(repoRoot, "screenshots"), join(outputDir, "screenshots"), { recursive: true });
+// Start from an empty output so stale files can never leak into a run.
+// (The output directory itself is the grader's mount point: clear its
+// children, never the directory itself.)
+mkdirSync(outDir, { recursive: true });
+for (const child of ["game", "screenshots", "dossier.json"]) {
+  rmSync(join(outDir, child), { recursive: true, force: true });
+}
 
-const caps = {
+cpSync(join(rootDir, "game"), join(outDir, "game"), { recursive: true });
+cpSync(join(rootDir, "screenshots"), join(outDir, "screenshots"), { recursive: true });
+
+const dossier = buildDossier(rootDir, {
   text_max_bytes: 163_840,
-  max_bytes: 1_572_864,
-  screenshots: { max: 4, max_bytes: 262_144 },
-};
-const dossier = buildDossier(outputDir, caps);
-writeFileSync(join(outputDir, "dossier.json"), dossier);
-console.log("dossier written:", dossier.length, "bytes");
+  max_bytes: DOSSIER_MAX_BYTES,
+  max_images: DOSSIER_MAX_IMAGES,
+});
+writeFileSync(join(outDir, "dossier.json"), dossier);
+
+console.log(`teluk-cerah: wrote game/, screenshots/ and dossier.json (${dossier.length} bytes) to ${outDir}`);

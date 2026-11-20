@@ -1,67 +1,69 @@
-// shoot.mjs — pengambil screenshot: menyalakan server statis, membuka game
-// di Chrome headless 1280x800 lewat puppeteer, memicu adegan tiap shot dari
-// shots.json, menyimpan JPG (<=256 KiB) ke folder screenshots repo.
+// Teluk Cerah — screenshot tool: serves the game, opens each scene from
+// shots.json in headless Chrome at 1280x800, waits for the scene to be
+// live, and saves real JPEG renders into screenshots/.
 import { spawn } from "node:child_process";
-import { readFileSync, statSync, mkdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
-import { homedir } from "node:os";
-import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 
-const root = dirname(fileURLToPath(import.meta.url));
+const rootDir = dirname(fileURLToPath(import.meta.url));
+const PORT = 8137;
 
 async function loadPuppeteer() {
-  try { return (await import("puppeteer")).default; } catch { /* fall through */ }
-  const candidates = [
-    join(homedir(), "workspace/tools/cdp/package.json"),
-    join(root, "package.json"),
+  try { return (await import("puppeteer")).default; } catch {}
+  const { createRequire } = await import("node:module");
+  const toolDirs = [
+    join(rootDir, "..", "..", "tools", "cdp"),
+    join(process.env.HOME || "", "workspace", "tools", "cdp"),
   ];
-  for (const c of candidates) {
-    try { return createRequire(c)("puppeteer"); } catch { /* next */ }
+  for (const dir of toolDirs) {
+    try {
+      const req = createRequire(join(dir, "package.json"));
+      const pup = req("puppeteer");
+      if (pup && pup.launch) return pup;
+    } catch {}
   }
-  // last resort: direct path into the puppeteer cache install
-  const direct = join(homedir(), "workspace/tools/cdp/node_modules/puppeteer/lib/esm/puppeteer/puppeteer.js");
-  return (await import(pathToFileURL(direct).href)).default;
+  throw new Error("puppeteer not found");
 }
 
-const shots = JSON.parse(readFileSync(join(root, "shots.json"), "utf8")).shots;
-const server = spawn("node", ["serve.ts"], { cwd: root, env: { ...process.env, PORT: "8080" }, stdio: "ignore" });
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-await sleep(900);
+const server = spawn(process.execPath, [join(rootDir, "serve.ts")], {
+  env: { ...process.env, PORT: String(PORT) },
+  stdio: "pipe",
+});
+await new Promise((r) => setTimeout(r, 900));
 
-const puppeteer = await loadPuppeteer();
-let failures = 0;
+let failed = false;
 try {
+  const puppeteer = await loadPuppeteer();
+  const shots = JSON.parse(readFileSync(join(rootDir, "shots.json"), "utf8"));
   for (const shot of shots) {
-    // browser segar per shot: renderer headless tidak menumpuk beban
+    // a fresh browser per shot: a long software-GL session can destabilise
+    // the renderer, and one bad scene must not lose the others
     const browser = await puppeteer.launch({
       headless: true,
-      args: ["--no-sandbox", "--disable-gpu-sandbox", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--window-size=1280,800"],
+      args: ["--no-sandbox", "--disable-dev-shm-usage", "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--window-size=1280,800"],
     });
-    const page = await browser.newPage();
-    await page.setViewport({ width: 1280, height: 800 });
-    const errors = [];
-    page.on("pageerror", (e) => errors.push(String(e)));
-    page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
-    await page.goto(shot.url, { waitUntil: "load", timeout: 90000 });
-    await page.waitForFunction(() => window.__shotReady === true, { timeout: 90000 });
-    await sleep(1400);
-    mkdirSync(dirname(join(root, shot.file)), { recursive: true });
-    let quality = 72;
-    for (;;) {
-      await page.screenshot({ path: join(root, shot.file), type: "jpeg", quality });
-      const size = statSync(join(root, shot.file)).size;
-      if (size <= 250 * 1024 || quality <= 36) {
-        console.log(`${shot.name}: ${size} bytes (q${quality}) errors=${errors.length}`);
-        break;
-      }
-      quality -= 10;
+    try {
+      const page = await browser.newPage();
+      await page.setViewport({ width: 1280, height: 800 });
+      const pageErrors = [];
+      page.on("pageerror", (e) => pageErrors.push(String(e)));
+      page.on("console", (m) => { if (m.type() === "error" && !m.text().includes("Failed to load resource")) pageErrors.push(m.text()); });
+      await page.goto(`http://localhost:${PORT}/?shot=${shot.scene}`, { waitUntil: "load", timeout: 60000 });
+      await page.waitForFunction("window.__tcReady === true", { timeout: 150000 });
+      await new Promise((r) => setTimeout(r, 500));
+      const out = join(rootDir, "screenshots", shot.file);
+      await page.screenshot({ path: out, type: "jpeg", quality: 80 });
+      console.log(`shot ${shot.name} -> ${out}${pageErrors.length ? " PAGEERRORS: " + pageErrors.join(" | ") : ""}`);
+      if (pageErrors.length) failed = true;
+    } catch (err) {
+      failed = true;
+      console.log(`shot ${shot.name} FAILED: ${String(err).slice(0, 300)}`);
+    } finally {
+      await browser.close().catch(() => {});
     }
-    if (errors.length) { failures++; console.log("PAGE ERRORS", shot.name, errors.slice(0, 4)); }
-    await page.close();
-    await browser.close();
   }
 } finally {
   server.kill();
 }
-process.exit(failures ? 2 : 0);
+process.exit(failed ? 2 : 0);

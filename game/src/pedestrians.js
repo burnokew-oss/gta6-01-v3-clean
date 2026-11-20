@@ -1,134 +1,156 @@
-// pedestrians.js — pejalan kaki beranatomi penuh: kepala berambut, torso
-// berlapis pakaian, lengan bersiku, kaki berlutut, pose langkah terbaca,
-// bayangan kontak. Juga dipakai untuk pemain dan musuh.
-import { Rng } from "./random.js";
+// Teluk Cerah — people with full anatomy: shaped heads with hair, layered
+// clothing on the torso, elbows on the arms, knees on the legs, a readable
+// stride and a soft contact shadow under every figure.
 
-const SKIN = [0xf2c79b, 0xc98d5e, 0x8a5a34, 0x6e4226];
-const SHIRT = [0xd21f2e, 0x2e7fc2, 0x37b85c, 0xffe93d, 0xff8a1e, 0xf15bb5, 0xf2f2f2, 0x2f8f83];
-const PANTS = [0x27313a, 0x3b4a63, 0x6e5636, 0x1e3a5c, 0x555f4a];
-const HAIR = [0x14100c, 0x2e1c10, 0x4a2f18, 0x777777];
+const SKIN = [0xc98d64, 0xa06844, 0x8a5636, 0xe0aa7c, 0x6e4526];
+const SHIRTS = [0xd8542e, 0x2e7ab8, 0xe8b13c, 0x3fa76a, 0xd8d3c8, 0x8a4a9e, 0xe2703a, 0x3fa7a0];
+const PANTS = [0x2c3440, 0x4a3a28, 0x5a6270, 0x24303c, 0x6e2430, 0x37474f];
+const HAIR = [0x14100c, 0x2c1c10, 0x4a2f18, 0x0c0c0e, 0x6e4526];
 
-function limb(w, len, mat) {
-  const pivot = new THREE.Group();
-  const m = new THREE.Mesh(new THREE.BoxGeometry(w, len, w), mat);
-  m.position.y = -len / 2; m.castShadow = true;
-  pivot.add(m);
-  return pivot;
+function capsule(r, len, color, rough = 0.85) {
+  const m = new THREE.Mesh(
+    new THREE.CapsuleGeometry(r, len, 3, 10),
+    new THREE.MeshStandardMaterial({ color, roughness: rough })
+  );
+  m.castShadow = true;
+  return m;
 }
 
-export function makePerson(rng, opts = {}) {
-  const skin = new THREE.MeshPhongMaterial({ color: opts.skin ?? rng.pick(SKIN) });
-  const shirt = new THREE.MeshPhongMaterial({ color: opts.shirt ?? rng.pick(SHIRT) });
-  const shirt2 = new THREE.MeshPhongMaterial({ color: opts.sleeve ?? opts.shirt ?? rng.pick(SHIRT) });
-  const pants = new THREE.MeshPhongMaterial({ color: opts.pants ?? rng.pick(PANTS) });
-  const hairMat = new THREE.MeshPhongMaterial({ color: opts.hair ?? rng.pick(HAIR) });
-  const shoe = new THREE.MeshPhongMaterial({ color: 0x1c1c20 });
+export function buildPerson(rng, opts = {}) {
   const g = new THREE.Group();
+  const skin = opts.skin ?? rng.pick(SKIN);
+  const shirt = opts.shirt ?? rng.pick(SHIRTS);
+  const pants = opts.pants ?? rng.pick(PANTS);
+  const hair = opts.hair ?? rng.pick(HAIR);
 
   const hips = new THREE.Group(); hips.position.y = 0.98; g.add(hips);
-  const pelvis = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.22, 0.22), pants);
-  pelvis.castShadow = true; hips.add(pelvis);
-  const torso = new THREE.Group(); torso.position.y = 0.08; hips.add(torso);
-  const chest = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.56, 0.26), shirt); // torso berbahu
-  chest.position.y = 0.32; chest.castShadow = true; torso.add(chest);
-  const collar = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.1, 0.28), shirt2);
-  collar.position.y = 0.58; torso.add(collar);
-  const headG = new THREE.Group(); headG.position.y = 0.68; torso.add(headG);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.155, 12, 10), skin);
-  head.position.y = 0.14; head.scale.y = 1.15; head.castShadow = true; headG.add(head);
-  const hair = new THREE.Mesh(new THREE.SphereGeometry(0.163, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.55), hairMat);
-  hair.position.y = 0.165; hair.scale.y = 1.12; headG.add(hair);
+  const pelvis = capsule(0.16, 0.10, pants); pelvis.rotation.z = Math.PI / 2; pelvis.scale.set(1, 0.8, 0.8);
+  hips.add(pelvis);
+  const torso = capsule(0.168, 0.36, shirt); torso.position.y = 0.36; torso.scale.set(1.10, 1, 0.74);
+  hips.add(torso);
+  if (opts.jacket !== undefined) { // open jacket layer over the shirt
+    const j = capsule(0.182, 0.34, opts.jacket); j.position.y = 0.36; j.scale.set(1.14, 1, 0.82);
+    hips.add(j);
+  }
+  const neck = capsule(0.05, 0.05, skin); neck.position.y = 0.66; hips.add(neck);
+  const headG = new THREE.Group(); headG.position.y = 0.78; hips.add(headG);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.115, 18, 14),
+    new THREE.MeshStandardMaterial({ color: skin, roughness: 0.65 }));
+  head.scale.set(0.92, 1.08, 0.98); head.castShadow = true;
+  headG.add(head);
+  const hairCap = new THREE.Mesh(new THREE.SphereGeometry(0.12, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.55),
+    new THREE.MeshStandardMaterial({ color: hair, roughness: 0.95 }));
+  hairCap.position.y = 0.018; hairCap.scale.set(0.95, 1.05, 1.0);
+  headG.add(hairCap);
   if (opts.cap) {
-    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.175, 0.07, 12), new THREE.MeshPhongMaterial({ color: opts.cap }));
-    cap.position.y = 0.27; headG.add(cap);
-    const brim = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.03, 0.16), cap.material);
-    brim.position.set(0, 0.24, 0.2); headG.add(brim);
+    const capTop = new THREE.Mesh(new THREE.SphereGeometry(0.122, 16, 8, 0, Math.PI * 2, 0, Math.PI * 0.42),
+      new THREE.MeshStandardMaterial({ color: opts.cap, roughness: 0.8 }));
+    capTop.position.y = 0.03; headG.add(capTop);
+    const brim = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.02, 0.12),
+      new THREE.MeshStandardMaterial({ color: opts.cap, roughness: 0.8 }));
+    brim.position.set(0, 0.055, 0.13); headG.add(brim);
   }
-  const arms = {}, legs = {};
-  for (const s of [-1, 1]) {
-    const sh = new THREE.Group(); sh.position.set(s * 0.28, 0.52, 0); torso.add(sh);
-    const upper = limb(0.11, 0.34, shirt2); sh.add(upper);
-    const el = new THREE.Group(); el.position.y = -0.34; upper.add(el);
-    const fore = limb(0.095, 0.32, skin); el.add(fore);
-    arms[s < 0 ? "L" : "R"] = { sh, el };
-    const hip = new THREE.Group(); hip.position.set(s * 0.11, -0.04, 0); hips.add(hip);
-    const thigh = limb(0.15, 0.46, pants); hip.add(thigh);
-    const knee = new THREE.Group(); knee.position.y = -0.46; thigh.add(knee);
-    const shin = limb(0.12, 0.44, pants); knee.add(shin);
-    const foot = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.07, 0.26), shoe);
-    foot.position.set(0, -0.44, 0.05); shin.add(foot);
-    legs[s < 0 ? "L" : "R"] = { hip, knee };
+
+  function limb(x, y, r, upperLen, lowerLen, upperColor, lowerColor) {
+    const pivot = new THREE.Group(); pivot.position.set(x, y, 0);
+    const upper = capsule(r, upperLen, upperColor); upper.position.y = -upperLen / 2 - r * 0.4;
+    pivot.add(upper);
+    const joint = new THREE.Group(); joint.position.y = -upperLen - r * 0.6;
+    const lower = capsule(r * 0.88, lowerLen, lowerColor); lower.position.y = -lowerLen / 2 - r * 0.3;
+    joint.add(lower);
+    pivot.add(joint);
+    return { pivot, joint };
   }
-  // bayangan kontak
-  const blob = new THREE.Mesh(new THREE.CircleGeometry(0.42, 12),
-    new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.32, depthWrite: false }));
-  blob.rotation.x = -Math.PI / 2; blob.position.y = 0.02; g.add(blob);
-  g.userData.parts = { hips, torso, headG, arms, legs };
-  return g;
-}
-
-export function poseWalk(person, phase, amp = 1) {
-  const p = person.userData.parts;
-  const s = Math.sin(phase);
-  p.legs.L.hip.rotation.x = s * 0.62 * amp;
-  p.legs.R.hip.rotation.x = -s * 0.62 * amp;
-  p.legs.L.knee.rotation.x = Math.max(0, -Math.cos(phase)) * 0.7 * amp + 0.05;
-  p.legs.R.knee.rotation.x = Math.max(0, Math.cos(phase)) * 0.7 * amp + 0.05;
-  p.arms.L.sh.rotation.x = -s * 0.5 * amp;
-  p.arms.R.sh.rotation.x = s * 0.5 * amp;
-  p.arms.L.el.rotation.x = -0.25 - Math.max(0, s) * 0.3;
-  p.arms.R.el.rotation.x = -0.25 - Math.max(0, -s) * 0.3;
-  p.hips.position.y = 0.98 + Math.abs(Math.cos(phase)) * 0.045;
-  p.torso.rotation.z = s * 0.04;
-}
-
-export function poseCrouchAim(person) { // pose tempur: jongkok, senjata terangkat
-  const p = person.userData.parts;
-  p.hips.position.y = 0.66;
-  p.legs.L.hip.rotation.x = -1.5; p.legs.L.knee.rotation.x = 2.0;
-  p.legs.R.hip.rotation.x = -0.5; p.legs.R.knee.rotation.x = 1.15;
-  p.torso.rotation.x = 0.24;
-  p.arms.R.sh.rotation.x = -1.45; p.arms.R.el.rotation.x = -0.12;
-  p.arms.L.sh.rotation.x = -1.2; p.arms.L.el.rotation.x = -0.55;
-  p.headG.rotation.x = 0.1;
-}
-
-export function poseStand(person) {
-  const p = person.userData.parts;
-  p.hips.position.y = 0.98;
-  for (const l of [p.legs.L, p.legs.R]) { l.hip.rotation.x = 0; l.knee.rotation.x = 0.03; }
-  for (const a of [p.arms.L, p.arms.R]) { a.sh.rotation.x = 0; a.el.rotation.x = -0.12; }
-  p.torso.rotation.x = 0;
-}
-
-export class Pedestrians {
-  constructor(scene, seed, count = 26) {
-    this.rng = new Rng(seed + 99);
-    this.list = [];
-    const spots = [];
-    for (let i = 0; i < count; i++) {
-      const person = makePerson(this.rng);
-      const onMain = i < 12;
-      const x = onMain ? this.rng.pick([-8.6, 8.6]) : Math.round(this.rng.float(-4, 4)) * 46 + this.rng.pick([-8.6, 8.6]);
-      const z = this.rng.float(-190, 130);
-      person.position.set(x, 0, onMain ? z : Math.round(this.rng.float(-4, 3)) * 46 + this.rng.float(-16, 16));
-      person.rotation.y = this.rng.chance(0.5) ? 0 : Math.PI;
-      scene.add(person);
-      const dir = new THREE.Vector3(0, 0, person.rotation.y === 0 ? 1 : -1);
-      this.list.push({ mesh: person, dir, speed: this.rng.float(1.1, 1.9), phase: this.rng.float(0, 6.28), crossing: false });
-      spots.push(person.position);
-    }
+  const armL = limb(-0.26, 0.55, 0.05, 0.26, 0.24, shirt, skin);
+  const armR = limb(0.26, 0.55, 0.05, 0.26, 0.24, shirt, skin);
+  hips.add(armL.pivot, armR.pivot);
+  const legL = limb(-0.10, 0.02, 0.065, 0.34, 0.34, pants, pants);
+  const legR = limb(0.10, 0.02, 0.065, 0.34, 0.34, pants, pants);
+  g.add(legL.pivot, legR.pivot);
+  legL.pivot.position.y = 0.98; legR.pivot.position.y = 0.98;
+  for (const leg of [legL, legR]) { // shoe
+    const shoe = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.05, 0.20),
+      new THREE.MeshStandardMaterial({ color: 0x1c1c20, roughness: 0.7 }));
+    shoe.position.set(0, -0.78, 0.045);
+    leg.joint.add(shoe);
   }
-  update(dt, t) {
-    for (const p of this.list) {
-      p.phase += dt * p.speed * 3.4;
-      p.mesh.position.addScaledVector(p.dir, p.speed * dt);
-      if (Math.abs(p.mesh.position.z) > 205 || Math.abs(p.mesh.position.x) > 205) {
-        p.dir.multiplyScalar(-1);
-        p.mesh.rotation.y += Math.PI;
+  // soft contact shadow
+  const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.34, 16),
+    new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.30, depthWrite: false }));
+  shadow.rotation.x = -Math.PI / 2; shadow.position.y = 0.02;
+  g.add(shadow);
+
+  const person = {
+    group: g, hips, headG, armL, armR, legL, legR,
+    phase: rng.range(0, Math.PI * 2),
+    setPose(walkPhase, aimPose = 0) {
+      const s = Math.sin(walkPhase), c = Math.cos(walkPhase);
+      legL.pivot.rotation.x = s * 0.62; legR.pivot.rotation.x = -s * 0.62;
+      legL.joint.rotation.x = Math.max(0, -c) * 0.85 + 0.06;
+      legR.joint.rotation.x = Math.max(0, c) * 0.85 + 0.06;
+      if (aimPose > 0) { // both arms raised toward a target, combat stance
+        armR.pivot.rotation.x = -1.45 * aimPose; armR.joint.rotation.x = -0.12;
+        armL.pivot.rotation.x = -1.32 * aimPose; armL.joint.rotation.x = -0.3;
+        armL.pivot.rotation.z = 0.25;
+      } else {
+        armL.pivot.rotation.x = -s * 0.5; armR.pivot.rotation.x = s * 0.5;
+        armL.joint.rotation.x = -0.25 - Math.max(0, s) * 0.3;
+        armR.joint.rotation.x = -0.25 - Math.max(0, -s) * 0.3;
+        armL.pivot.rotation.z = 0.08; armR.pivot.rotation.z = -0.08;
       }
-      poseWalk(p.mesh, p.phase);
+      hips.position.y = 0.98 + Math.abs(Math.cos(walkPhase)) * 0.035;
+      hips.rotation.z = s * 0.03;
+    },
+  };
+  return person;
+}
+
+export function buildHeroFigure(rng) {
+  return buildPerson(rng, {
+    skin: 0xa06844, shirt: 0xf0ead8, jacket: 0xb8352a, pants: 0x24303c, hair: 0x14100c,
+  });
+}
+
+// A crowd that walks rectangular loops around blocks on the sidewalks,
+// crossing streets at corners, so the city never feels staged or empty.
+export function createCrowd(THREEref, scene, rng, city) {
+  const walkers = [];
+  const loops = [];
+  for (let i = 0; i < city.streetsX.length - 1; i++) {
+    for (let j = 0; j < city.avenuesZ.length - 1; j++) {
+      const x0 = city.streetsX[i] + city.roadW / 2 + 2.2, x1 = city.streetsX[i + 1] - city.roadW / 2 - 2.2;
+      const z0 = city.avenuesZ[j] + city.roadW / 2 + 2.2, z1 = city.avenuesZ[j + 1] - city.roadW / 2 - 2.2;
+      loops.push([[x0, z0], [x1, z0], [x1, z1], [x0, z1]]);
     }
   }
-  setFrozen(t) { for (const p of this.list) poseWalk(p.mesh, p.phase + 0.9); }
+  const COUNT = 30;
+  for (let i = 0; i < COUNT; i++) {
+    const person = buildPerson(rng, {});
+    const loop = loops[i % loops.length];
+    const seg = rng.int(0, 3);
+    const w = {
+      person, loop, seg, u: rng.next(), speed: rng.range(1.0, 1.7),
+      x: 0, z: 0, heading: 0, phase: rng.range(0, 6),
+    };
+    walkers.push(w);
+    scene.add(person.group);
+  }
+  function segLen(a, b) { return Math.hypot(b[0] - a[0], b[1] - a[1]); }
+  function update(dt) {
+    for (const w of walkers) {
+      const a = w.loop[w.seg], b = w.loop[(w.seg + 1) % 4];
+      const len = segLen(a, b);
+      w.u += (w.speed * dt) / len;
+      if (w.u >= 1) { w.u = 0; w.seg = (w.seg + 1) % 4; }
+      const na = w.loop[w.seg], nb = w.loop[(w.seg + 1) % 4];
+      w.x = na[0] + (nb[0] - na[0]) * w.u;
+      w.z = na[1] + (nb[1] - na[1]) * w.u;
+      w.heading = Math.atan2(nb[0] - na[0], nb[1] - na[1]);
+      w.phase += dt * w.speed * 4.4;
+      w.person.group.position.set(w.x, 0, w.z);
+      w.person.group.rotation.y = w.heading;
+      w.person.setPose(w.phase, 0);
+    }
+  }
+  return { walkers, update };
 }

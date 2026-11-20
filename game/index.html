@@ -3,149 +3,182 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Teluk Cerah — Kota Matahari Terbit</title>
+<title>Teluk Cerah — Kota Pesisir Terbuka</title>
 <link rel="icon" href="data:,">
 <style>
-  * { margin:0; padding:0; box-sizing:border-box; }
-  html,body { width:100%; height:100%; overflow:hidden; background:#0b1620; font-family:'Segoe UI',system-ui,sans-serif; color:#fff; }
-  #game { position:fixed; inset:0; width:100%; height:100%; display:block; }
-  .panel { background:rgba(8,14,20,.78); border:1px solid rgba(255,255,255,.22); border-radius:10px; backdrop-filter:blur(3px); }
-  /* ---------- HUD kiri atas: misi + dispatch ---------- */
-  #hud-left { position:fixed; top:14px; left:14px; width:308px; padding:10px 12px; z-index:5; }
-  #hud-mission { font-weight:700; color:#ffd94d; font-size:15px; text-shadow:0 1px 3px #000; }
-  #hud-objective { font-size:13px; margin-top:3px; line-height:1.35; }
-  #hud-dispatch { margin-top:8px; font-size:11px; color:#9fd8ef; line-height:1.5; min-height:16px; }
-  /* ---------- HUD kanan atas: status ---------- */
-  #hud-right { position:fixed; top:14px; right:14px; width:228px; padding:10px 12px; z-index:5; text-align:right; }
-  #hud-money { font-size:24px; font-weight:800; color:#7ee08a; text-shadow:0 2px 4px #000; }
-  #hud-rep { font-size:11px; color:#ffd94d; letter-spacing:1px; }
-  #hud-clock { font-size:12px; color:#cfe8f5; margin-top:2px; }
-  #hud-stars { font-size:21px; letter-spacing:2px; margin-top:2px; text-shadow:0 0 8px rgba(255,217,77,.6); }
-  .bar-wrap { height:11px; background:#10161c; border:1px solid rgba(255,255,255,.35); border-radius:5px; margin-top:6px; overflow:hidden; }
-  .bar-fill { height:100%; width:100%; transition:width .25s; }
-  #bar-hp { background:linear-gradient(90deg,#37d353,#7ee08a); }
-  #bar-armor { background:linear-gradient(90deg,#3f7fbf,#6ab0ff); width:0%; }
-  .bar-label { font-size:10px; text-align:left; color:#cfe8f5; letter-spacing:1px; margin-top:5px; }
-  #hud-weapon { margin-top:7px; font-size:14px; font-weight:700; }
-  #hud-ammo { font-size:12px; color:#ffd94d; }
-  #hud-radio { margin-top:6px; font-size:11px; color:#f7b733; }
-  /* ---------- minimap ---------- */
-  #minimap-wrap { position:fixed; left:14px; bottom:14px; z-index:5; border-radius:10px; overflow:hidden; border:1px solid rgba(255,255,255,.35); }
-  #minimap { display:block; width:190px; height:190px; }
-  /* ---------- kecepatan ---------- */
-  #hud-speed { position:fixed; right:18px; bottom:16px; z-index:5; text-align:center; padding:8px 16px; opacity:0; transition:opacity .3s; }
-  #hud-speed b { font-size:34px; color:#fff; }
-  #hud-speed span { font-size:11px; color:#9fd8ef; display:block; letter-spacing:2px; }
-  #nos-wrap { height:7px; background:#10161c; border-radius:4px; margin-top:5px; overflow:hidden; }
-  #bar-nos { height:100%; width:0%; background:linear-gradient(90deg,#00e5ff,#7cff4f); }
-  /* ---------- dialog / notifikasi / prompt ---------- */
-  #dialog-box { position:fixed; left:50%; bottom:118px; transform:translateX(-50%); width:560px; max-width:92vw; padding:12px 16px; z-index:6; opacity:0; transition:opacity .4s; }
-  #dialog-who { color:#ffd94d; font-weight:700; font-size:14px; }
-  #dialog-text { font-size:14px; margin-top:2px; line-height:1.4; }
-  #notify-box { position:fixed; left:50%; top:84px; transform:translateX(-50%); z-index:6; padding:9px 22px; border-radius:24px; background:rgba(20,40,24,.88); border:1px solid #7ee08a; color:#d8ffd8; font-weight:600; font-size:15px; opacity:0; transition:opacity .4s; }
-  #hud-prompt { position:fixed; left:50%; bottom:26px; transform:translateX(-50%); z-index:5; padding:7px 18px; border-radius:20px; background:rgba(8,14,20,.8); border:1px solid rgba(255,255,255,.3); font-size:13px; opacity:0; transition:opacity .3s; }
-  #crosshair { position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); z-index:4; color:rgba(255,255,255,.85); font-size:20px; text-shadow:0 0 4px #000; pointer-events:none; }
-  /* ---------- layar judul ---------- */
-  #title-screen { position:fixed; inset:0; z-index:20; display:flex; align-items:center; background:linear-gradient(90deg, rgba(10,8,18,.88) 0%, rgba(10,8,18,.55) 44%, rgba(10,8,18,0) 70%); }
-  #title-inner { margin-left:6vw; max-width:520px; }
-  #title-logo { font-size:74px; font-weight:900; line-height:.95; letter-spacing:1px;
-    background:linear-gradient(180deg,#ffe93d 15%,#ff8c42 55%,#ff3860 100%); -webkit-background-clip:text; background-clip:text; color:transparent;
-    filter:drop-shadow(0 4px 0 rgba(60,10,40,.55)) drop-shadow(0 10px 22px rgba(0,0,0,.5)); }
-  #title-sub { margin-top:8px; font-size:17px; color:#ffe9c9; text-shadow:0 2px 6px #000; letter-spacing:3px; }
-  #title-story { margin-top:14px; font-size:14px; line-height:1.55; color:#e8f2f8; text-shadow:0 1px 4px #000; max-width:430px; }
-  #title-menu { margin-top:22px; display:flex; flex-direction:column; gap:9px; width:300px; }
-  .tbtn { padding:12px 18px; font-size:16px; font-weight:700; color:#fff; text-align:left; cursor:pointer;
-    background:linear-gradient(90deg, rgba(255,56,96,.85), rgba(255,140,66,.75)); border:1px solid rgba(255,255,255,.4); border-radius:8px; }
-  .tbtn:hover { filter:brightness(1.2); }
-  .tbtn.ghost { background:rgba(8,14,20,.7); }
-  #portrait { border-radius:50%; border:3px solid #ffd94d; box-shadow:0 6px 24px rgba(0,0,0,.6); position:absolute; right:6vw; bottom:7vh; width:170px; height:170px; background:#f7b733; }
-  #title-controls { position:absolute; left:6vw; bottom:5vh; font-size:12px; color:#cfe8f5; text-shadow:0 1px 3px #000; line-height:1.7; }
-  /* ---------- pause / peta / toko ---------- */
-  .overlay { position:fixed; inset:0; z-index:30; display:none; align-items:center; justify-content:center; background:rgba(5,10,16,.72); }
-  .overlay.open { display:flex; }
-  .card { padding:26px 30px; width:520px; max-width:94vw; max-height:92vh; overflow:auto; }
-  .card h2 { color:#ffd94d; margin-bottom:12px; font-size:24px; }
-  .card p { font-size:14px; line-height:1.6; color:#e8f2f8; }
-  .mbtn { display:block; width:100%; margin-top:9px; padding:11px 14px; font-size:15px; font-weight:600; color:#fff; text-align:left;
-    background:rgba(38,64,84,.9); border:1px solid rgba(255,255,255,.3); border-radius:8px; cursor:pointer; }
-  .mbtn:hover { background:rgba(58,94,120,.95); }
-  .mbtn small { display:block; font-weight:400; color:#9fd8ef; font-size:12px; margin-top:2px; }
-  #map-overlay { background:rgba(5,10,16,.9); }
-  #map-canvas { width:min(1160px,96vw); height:auto; border:1px solid rgba(255,255,255,.3); border-radius:10px; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #101820; font-family: "Segoe UI", Arial, sans-serif; color: #fff; }
+  #game-canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  .panel { background: rgba(10, 16, 22, 0.62); border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 8px; backdrop-filter: blur(3px); }
+  /* ---------- HUD ---------- */
+  #hud { position: fixed; inset: 0; pointer-events: none; display: none; }
+  #mission-box { position: absolute; top: 16px; left: 16px; padding: 10px 14px; max-width: 380px; }
+  #mission-title { color: #ffc93c; font-weight: 800; font-size: 15px; letter-spacing: 1.2px; text-transform: uppercase; }
+  #objective { font-size: 14px; margin-top: 3px; color: #f2f4f6; }
+  #objective::before { content: "◆ "; color: #ffc93c; }
+  #stats-box { position: absolute; top: 16px; right: 16px; padding: 10px 14px; text-align: right; min-width: 210px; }
+  #money { color: #7ddb6a; font-size: 24px; font-weight: 800; text-shadow: 0 2px 4px rgba(0,0,0,0.6); }
+  #rep { color: #ffd76a; font-size: 12px; font-weight: 700; letter-spacing: 1px; margin-left: 8px; }
+  #clock { color: #dfe8ee; font-size: 13px; margin-top: 2px; letter-spacing: 1px; }
+  #stars { font-size: 21px; letter-spacing: 3px; margin-top: 2px; text-shadow: 0 2px 5px rgba(0,0,0,0.7); }
+  #dispatch { margin-top: 7px; font-size: 11.5px; line-height: 1.5; color: #a8cdf0; text-align: right; min-height: 17px; }
+  #dispatch::before { content: "DISPATCH POLISI"; display: block; color: #5b83c4; font-size: 9.5px; font-weight: 800; letter-spacing: 2px; }
+  #left-bottom { position: absolute; left: 16px; bottom: 16px; }
+  #minimap { width: 196px; height: 196px; border-radius: 10px; border: 2px solid rgba(255,255,255,0.35); box-shadow: 0 4px 18px rgba(0,0,0,0.5); display: block; }
+  .bar { width: 196px; height: 11px; background: rgba(0,0,0,0.55); border: 1px solid rgba(255,255,255,0.25); border-radius: 5px; margin-top: 6px; overflow: hidden; }
+  .bar > div { height: 100%; transition: width 0.15s; }
+  #hp-fill { background: #57c84a; width: 100%; }
+  #armor-fill { background: #5b83c4; width: 0%; }
+  .bar-label { font-size: 9px; letter-spacing: 2px; color: rgba(255,255,255,0.75); margin-top: 5px; font-weight: 700; }
+  #radio-info { margin-top: 8px; font-size: 12px; color: #ffd76a; text-shadow: 0 1px 3px rgba(0,0,0,0.8); }
+  #radio-info b { color: #fff; }
+  #right-bottom { position: absolute; right: 16px; bottom: 16px; text-align: right; }
+  #weapon-box { padding: 8px 13px; display: inline-block; }
+  #weapon-name { font-size: 13px; font-weight: 800; letter-spacing: 2px; color: #f2f4f6; }
+  #ammo { font-size: 25px; font-weight: 800; color: #fff; text-shadow: 0 2px 4px rgba(0,0,0,0.6); }
+  #speedo { margin-top: 10px; display: none; text-align: right; }
+  #speed-num { font-size: 52px; font-weight: 900; line-height: 0.95; text-shadow: 0 3px 8px rgba(0,0,0,0.65); font-style: italic; }
+  #speed-unit { font-size: 13px; letter-spacing: 2px; color: #ffd76a; font-weight: 700; }
+  #nos-track { width: 130px; height: 7px; background: rgba(0,0,0,0.55); border: 1px solid rgba(255,255,255,0.3); border-radius: 4px; margin: 6px 0 0 auto; overflow: hidden; }
+  #nos-fill { height: 100%; background: linear-gradient(90deg, #3ad2ff, #7dff5a); width: 60%; }
+  #crosshair { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font-size: 20px; color: rgba(255,255,255,0.9); text-shadow: 0 0 6px rgba(0,0,0,0.9); display: none; }
+  #dialogue { position: absolute; left: 50%; bottom: 108px; transform: translateX(-50%); width: min(620px, 80vw); padding: 11px 16px; display: none; }
+  #dialogue-name { color: #ffc93c; font-weight: 800; font-size: 13px; letter-spacing: 1.5px; text-transform: uppercase; }
+  #dialogue-text { font-size: 15.5px; margin-top: 2px; line-height: 1.4; }
+  #notify { position: absolute; top: 84px; left: 50%; transform: translateX(-50%); padding: 9px 20px; font-size: 15px; font-weight: 700; color: #ffe9b8; display: none; border-color: rgba(255,201,60,0.5); }
+  #hint { position: absolute; bottom: 226px; left: 16px; font-size: 13.5px; color: #ffe9b8; text-shadow: 0 1px 4px rgba(0,0,0,0.9); font-weight: 600; }
+  /* ---------- overlays ---------- */
+  .overlay { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; flex-direction: column; z-index: 30; }
+  #title-screen { background: linear-gradient(180deg, rgba(16,24,34,0.18) 0%, rgba(16,24,34,0.42) 62%, rgba(10,12,18,0.78) 100%); }
+  #title-inner { display: flex; gap: 34px; align-items: center; }
+  #portrait { width: 252px; height: 315px; border-radius: 12px; border: 3px solid rgba(255,201,60,0.75); box-shadow: 0 14px 44px rgba(0,0,0,0.6); }
+  #title-text h1 { font-size: 76px; font-weight: 900; font-style: italic; letter-spacing: 1px; line-height: 0.95;
+    background: linear-gradient(180deg, #fff6da 15%, #ffc93c 48%, #e2703a 85%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    filter: drop-shadow(0 4px 0 rgba(90,20,10,0.85)) drop-shadow(0 10px 22px rgba(0,0,0,0.55)); }
+  #title-text h2 { font-size: 19px; letter-spacing: 6px; color: #bfe6f5; font-weight: 700; margin-top: 8px; text-shadow: 0 2px 6px rgba(0,0,0,0.8); }
+  #title-menu { margin-top: 26px; display: flex; flex-direction: column; gap: 9px; width: 300px; }
+  .menu-btn { pointer-events: auto; cursor: pointer; text-align: left; background: rgba(10,16,22,0.72); color: #fff; border: 1px solid rgba(255,255,255,0.22);
+    border-left: 5px solid #ffc93c; padding: 11px 16px; font-size: 16.5px; font-weight: 700; letter-spacing: 1px; border-radius: 6px; font-family: inherit; }
+  .menu-btn:hover { background: rgba(255,201,60,0.85); color: #1a1408; }
+  #how-panel { margin-top: 14px; width: 430px; padding: 12px 16px; font-size: 13.5px; line-height: 1.65; display: none; }
+  #title-foot { position: absolute; bottom: 20px; font-size: 12.5px; color: rgba(255,255,255,0.75); letter-spacing: 1.5px; }
+  #pause-menu { background: rgba(8, 12, 16, 0.72); }
+  #pause-box { padding: 24px 30px; width: 400px; }
+  #pause-box h2 { color: #ffc93c; letter-spacing: 3px; font-size: 24px; margin-bottom: 14px; }
+  #pause-box .menu-btn { width: 100%; margin-bottom: 8px; }
+  .slot-row { display: flex; gap: 8px; margin-bottom: 8px; }
+  .slot-row .menu-btn { flex: 1; font-size: 13px; padding: 8px 10px; }
+  .slot-info { font-size: 11.5px; color: #a8cdf0; align-self: center; flex: 1.2; }
+  #map-overlay { background: rgba(8, 14, 18, 0.88); flex-direction: row; gap: 22px; }
+  #bigmap { border: 2px solid rgba(255,255,255,0.3); border-radius: 10px; }
+  #map-legend { padding: 16px 18px; font-size: 14px; line-height: 2.0; min-width: 210px; }
+  #map-legend h3 { color: #ffc93c; letter-spacing: 2px; margin-bottom: 6px; }
+  .dot { display: inline-block; width: 11px; height: 11px; border-radius: 50%; margin-right: 8px; vertical-align: middle; }
+  #shop-panel { position: fixed; right: 18px; top: 50%; transform: translateY(-50%); width: 320px; padding: 18px; display: none; z-index: 25; }
+  #shop-title { color: #ffc93c; font-size: 18px; font-weight: 800; letter-spacing: 1px; margin-bottom: 12px; }
+  .shop-item { display: block; width: 100%; text-align: left; margin-bottom: 8px; padding: 10px 12px; font-size: 14px; font-weight: 600;
+    background: rgba(255,255,255,0.08); color: #fff; border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; cursor: pointer; font-family: inherit; }
+  .shop-item:hover { background: rgba(255,201,60,0.8); color: #1a1408; }
+  .shop-exit { border-color: rgba(255,201,60,0.6); }
+  #wasted { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; z-index: 40;
+    background: radial-gradient(ellipse at center, rgba(60,0,0,0.25), rgba(20,0,0,0.75)); }
+  #wasted span { font-size: 64px; font-weight: 900; letter-spacing: 10px; color: #e83a30; text-shadow: 0 6px 30px rgba(0,0,0,0.9); }
 </style>
 </head>
 <body>
-<canvas id="game"></canvas>
-<div id="crosshair">+</div>
+<canvas id="game-canvas"></canvas>
 
-<div id="hud-left" class="panel">
-  <div id="hud-mission">Misi 1/10: Pulang ke Teluk</div>
-  <div id="hud-objective">▸ Temui pemberi misi</div>
-  <div id="hud-dispatch"></div>
-</div>
-
-<div id="hud-right" class="panel">
-  <div id="hud-money">$250</div>
-  <div id="hud-rep">REP 0</div>
-  <div id="hud-clock">Hari 1 · 17:20</div>
-  <div id="hud-wanted"><span id="hud-stars">☆☆☆☆☆</span></div>
-  <div class="bar-label">HP</div>
-  <div class="bar-wrap"><div id="bar-hp" class="bar-fill"></div></div>
-  <div class="bar-label">ARMOR</div>
-  <div class="bar-wrap"><div id="bar-armor" class="bar-fill"></div></div>
-  <div id="hud-weapon">Pistol P9</div>
-  <div id="hud-ammo">60</div>
-  <div id="hud-radio">♪ Gelombang 98.2</div>
-</div>
-
-<div id="minimap-wrap"><canvas id="minimap" width="190" height="190"></canvas></div>
-
-<div id="hud-speed" class="panel"><b>0</b><span>KM/JAM · NOS</span><div id="nos-wrap"><div id="bar-nos"></div></div></div>
-<div id="dialog-box" class="panel"><div id="dialog-who"></div><div id="dialog-text"></div></div>
-<div id="notify-box"></div>
-<div id="hud-prompt"></div>
-
-<div id="title-screen">
-  <div id="title-inner">
-    <div id="title-logo">TELUK<br>CERAH</div>
-    <div id="title-sub">KOTA MATAHARI TERBIT</div>
-    <p id="title-story">Raka pulang ke kota pesisir Teluk Cerah setelah lima tahun merantau. Di antara pasar ikan, dermaga, dan jalanan neon yang basah, ia harus menuntaskan 10 misi: mencuri mobil, merampok toko, berkejaran dengan polisi, dan satu pertempuran terakhir di pelabuhan.</p>
-    <div id="title-menu">
-      <button class="tbtn" id="btn-play">▶ &nbsp;MAIN — Pulang ke Teluk</button>
-      <button class="tbtn ghost" id="btn-how">? &nbsp;Cara Main</button>
-      <button class="tbtn ghost" id="btn-load">▤ &nbsp;Muat Simpanan</button>
+<div id="hud">
+  <div id="mission-box" class="panel">
+    <div id="mission-title"></div>
+    <div id="objective"></div>
+  </div>
+  <div id="stats-box" class="panel">
+    <div><span id="money">$0</span><span id="rep">REP 0</span></div>
+    <div id="clock">SENIN 18:00</div>
+    <div id="stars">☆☆☆☆☆</div>
+    <div id="dispatch"></div>
+  </div>
+  <div id="left-bottom">
+    <canvas id="minimap" width="196" height="196"></canvas>
+    <div class="bar-label">KESEHATAN</div>
+    <div class="bar"><div id="hp-fill"></div></div>
+    <div class="bar-label">ARMOR</div>
+    <div class="bar"><div id="armor-fill"></div></div>
+    <div id="radio-info"></div>
+  </div>
+  <div id="right-bottom">
+    <div id="weapon-box" class="panel">
+      <div id="weapon-name">PISTOL</div>
+      <div id="ammo">12 / 60</div>
+    </div>
+    <div id="speedo">
+      <div><span id="speed-num">0</span> <span id="speed-unit">KM/JAM</span></div>
+      <div id="nos-track"><div id="nos-fill"></div></div>
     </div>
   </div>
-  <canvas id="portrait" width="340" height="340"></canvas>
-  <div id="title-controls">WASD jalan/kemudi · E interaksi · F keluar mobil · Klik tembak · 1/2/3 senjata · M peta · R radio · H klakson · Esc jeda</div>
+  <div id="crosshair">＋</div>
+  <div id="dialogue" class="panel">
+    <div id="dialogue-name"></div>
+    <div id="dialogue-text"></div>
+  </div>
+  <div id="notify" class="panel"></div>
+  <div id="hint"></div>
 </div>
 
-<div id="pause-menu" class="overlay"><div class="card panel">
-  <h2>Jeda — Teluk Cerah</h2>
-  <p id="pause-stats"></p>
-  <button class="mbtn" id="btn-resume">Lanjutkan</button>
-  <button class="mbtn" id="btn-save0">Simpan ke Slot 1<small id="save-info-0"></small></button>
-  <button class="mbtn" id="btn-save1">Simpan ke Slot 2<small id="save-info-1"></small></button>
-  <button class="mbtn" id="btn-save2">Simpan ke Slot 3<small id="save-info-2"></small></button>
-  <button class="mbtn" id="btn-load0">Muat Slot 1</button>
-  <button class="mbtn" id="btn-load1">Muat Slot 2</button>
-  <button class="mbtn" id="btn-load2">Muat Slot 3</button>
-  <button class="mbtn" id="btn-quit-title">Ke Layar Judul</button>
-</div></div>
-
-<div id="shop-menu" class="overlay"><div class="card panel">
-  <h2 id="shop-title">Toko</h2>
+<div id="shop-panel" class="panel">
+  <div id="shop-title"></div>
   <div id="shop-items"></div>
-  <button class="mbtn" id="btn-shop-close">Tutup (Esc)</button>
-</div></div>
+</div>
 
-<div id="how-menu" class="overlay"><div class="card panel">
-  <h2>Cara Main</h2>
-  <p>Jalan kaki: WASD + mouse, Shift lari. Dekati mobil lalu tekan E untuk masuk, F untuk keluar, Space rem tangan, Shift NOS (setelah upgrade). Klik kiri menembak, 1/2/3 ganti senjata. Ikuti penanda kuning untuk misi, belanja di garasi/toko/warung lewat tombol E. Naikkan reputasi lewat 10 misi cerita, hindari bintang wanted atau kabur sampai padam. M membuka peta kota, Esc membuka jeda dan simpanan 3 slot.</p>
-  <button class="mbtn" id="btn-how-close">Kembali</button>
-</div></div>
+<div id="title-screen" class="overlay">
+  <div id="title-inner">
+    <canvas id="portrait" width="336" height="420"></canvas>
+    <div id="title-text">
+      <h1>TELUK<br>CERAH</h1>
+      <h2>KOTA PESISIR • SEPULUH MISI • SATU NAMA</h2>
+      <div id="title-menu">
+        <button class="menu-btn" id="btn-start">▶ &nbsp;MULAI CERITA</button>
+        <button class="menu-btn" id="btn-free">◆ &nbsp;KELILING KOTA</button>
+        <button class="menu-btn" id="btn-how">? &nbsp;CARA MAIN</button>
+      </div>
+      <div id="how-panel" class="panel">
+        WASD — bergerak / mengemudi &nbsp;•&nbsp; Mouse seret — kamera<br>
+        E — masuk mobil / bicara toko &nbsp;•&nbsp; Klik kiri — menembak<br>
+        1/2/3 — ganti senjata &nbsp;•&nbsp; R — isi peluru / ganti radio<br>
+        M — peta kota &nbsp;•&nbsp; Shift — lari / NOS &nbsp;•&nbsp; Esc — jeda &amp; simpan
+      </div>
+    </div>
+  </div>
+  <div id="title-foot">RAKA PULANG KE KOTA YANG TIDAK PERNAH TIDUR • TELUK CERAH</div>
+</div>
 
-<div id="map-overlay" class="overlay"><canvas id="map-canvas" width="1160" height="760"></canvas></div>
+<div id="pause-menu" class="overlay">
+  <div id="pause-box" class="panel">
+    <h2>JEDA</h2>
+    <button class="menu-btn" id="btn-resume">LANJUT MAIN</button>
+    <div id="save-slots"></div>
+    <button class="menu-btn" id="btn-quit-title">KE LAYAR JUDUL</button>
+  </div>
+</div>
+
+<div id="map-overlay" class="overlay">
+  <canvas id="bigmap" width="920" height="600"></canvas>
+  <div id="map-legend" class="panel">
+    <h3>PETA TELUK CERAH</h3>
+    <div><span class="dot" style="background:#fff"></span>Raka (kamu)</div>
+    <div><span class="dot" style="background:#ffc93c"></span>Objektif misi</div>
+    <div><span class="dot" style="background:#3a7bff"></span>Polisi</div>
+    <div><span class="dot" style="background:#e2703a"></span>Bengkel Pelita</div>
+    <div><span class="dot" style="background:#5b83c4"></span>Toko Senjata Baruna</div>
+    <div><span class="dot" style="background:#c65b9e"></span>Butik Ombak</div>
+    <div><span class="dot" style="background:#e8b13c"></span>Warung Senja</div>
+    <div style="margin-top:8px;color:#a8cdf0">Tekan M atau Esc untuk kembali</div>
+  </div>
+</div>
+
+<div id="wasted"><span>TERTANGKAP</span></div>
 
 <script src="vendor/three.min.js"></script>
 <script type="module" src="src/main.js"></script>

@@ -1,268 +1,383 @@
-// main.js — bootstrap Teluk Cerah: merangkai semua modul, loop game dengan
-// delta waktu ter-clamp (tidak pernah negatif, maksimal 0.05 detik),
-// resize, pause, mode adegan screenshot.
-import { WORLD, VEHICLES } from "./config.js";
-import { Render } from "./render.js";
-import { City } from "./city.js";
-import { Input } from "./input.js";
-import { makeCar, Traffic } from "./vehicles.js";
-import { Pedestrians } from "./pedestrians.js";
-import { Police } from "./police.js";
-import { Helicopter } from "./helicopter.js";
-import { Player } from "./player.js";
-import { Combat } from "./combat.js";
-import { Missions } from "./missions.js";
-import { Shops } from "./shops.js";
-import { Radio } from "./radio.js";
-import { AudioFx } from "./audio.js";
-import { Hud } from "./hud.js";
-import { saveGame, loadGame, slotSummary, collectState, applyState } from "./save.js";
-import { shotName, setupShot } from "./shots.js";
+// Teluk Cerah — bootstrap: builds the world, wires every system
+// together, runs the game loop with a clamped delta, and handles the
+// title / pause / map flow plus the screenshot scenes.
 
-const canvas = document.getElementById("game");
-const render = new Render(canvas);
-const scene = render.scene;
-const camera = render.camera;
-const city = new City(scene, WORLD.seed);
-const input = new Input(canvas);
-const audio = new AudioFx();
-const player = new Player(scene);
-const traffic = new Traffic(scene, city, 10);
-const pedestrians = new Pedestrians(scene, WORLD.seed, 26);
-const police = new Police(scene);
-const helicopter = new Helicopter(scene);
-const combat = new Combat(scene, audio);
-const missions = new Missions(scene);
-const shops = new Shops();
-const radio = new Radio(audio);
-const hud = new Hud();
+import { createStage } from "./render.js";
+import { createCity } from "./city.js";
+import { createCrowd } from "./pedestrians.js";
+import { createPlayer } from "./player.js";
+import { createPolice } from "./police.js";
+import { createCombat } from "./combat.js";
+import { createMissions } from "./missions.js";
+import { createShops } from "./shops.js";
+import { createHud } from "./hud.js";
+import { createInput } from "./input.js";
+import { createAudio } from "./audio.js";
+import { createRadio } from "./radio.js";
+import { saveGame, loadGame, slotSummary } from "./save.js";
+import { trafficVehicle, updateVehicleVisual } from "./vehicles.js";
+import { makeRng, WORLD_SEED } from "./random.js";
+import { CITY, VEHICLE_TYPES } from "./config.js";
+import { setupShot } from "./shots.js";
 
-function driveable(mesh, specIdx, yaw = 0) {
-  return {
-    mesh, spec: VEHICLES[specIdx],
-    state: { yaw, speed: 0 },
-    get upgrades() { return { nos: shops.owned.has("nos") }; },
-  };
-}
-const heroCar = driveable(makeCar({ color: 0xd21f2e, hero: true, plate: "TC 777 RA" }), 1, Math.PI);
-heroCar.mesh.position.set(4.5, 0, 30);
-scene.add(heroCar.mesh);
-const parkedCars = [heroCar];
-const extraSpecs = [[2, -30, 80], [0, 40, -70], [4, -90, 30], [3, 90, -100]];
-for (const [spec, x, z] of extraSpecs) {
-  const c = driveable(makeCar({ color: VEHICLES[spec].color }), spec, 0.4);
-  c.mesh.position.set(x, 0, z);
-  c.mesh.rotation.y = -Math.PI / 2 + 0.4;
-  scene.add(c.mesh);
-  parkedCars.push(c);
-}
+const errors = [];
+window.addEventListener("error", (e) => errors.push(String(e.message || e.error)));
+window.__tcErrors = errors;
 
-const game = {
-  render, city, player, traffic, pedestrians, police, helicopter, combat,
-  missions, shops, radio, hud, heroCar, camera,
-  clockMin: 17 * 60 + 20, day: 1,
-  state: "title", shotFixed: false,
+const params = new URLSearchParams(location.search);
+const shotName = params.get("shot");
+
+const rng = makeRng(WORLD_SEED);
+const stage = createStage(document.getElementById("game-canvas"));
+const { scene, camera } = stage;
+
+const S = {
+  money: 750, rep: 0, hp: 100, armor: 0, wanted: 0,
+  timeMin: 17 * 60 + 40, day: 0, outfit: "Kemeja Putih + Jaket Merah",
+  upgrades: { engine: 0, nos: false },
 };
-combat.onCrime = (n) => police.addHeat(n);
-combat.onKill = () => { player.money += 40; audio.coin(); hud.notify("Musuh tumbang +$40"); };
+const DAYS = ["SENIN", "SELASA", "RABU", "KAMIS", "JUMAT", "SABTU", "MINGGU"];
 
-// potret karakter Raka di layar judul (ilustrasi canvas orisinal)
-(function portrait() {
-  const c = document.getElementById("portrait");
-  if (!c) return;
-  const g = c.getContext("2d");
-  const grad = g.createLinearGradient(0, 0, 0, 340);
-  grad.addColorStop(0, "#ff8c42"); grad.addColorStop(0.6, "#ff3860"); grad.addColorStop(1, "#5b2a86");
-  g.fillStyle = grad; g.fillRect(0, 0, 340, 340);
-  g.fillStyle = "#ffe93d"; g.beginPath(); g.arc(272, 66, 30, 0, 7); g.fill();
-  g.fillStyle = "#123a5c"; g.fillRect(0, 268, 340, 72);
-  g.fillStyle = "#1b5a8a";
-  for (let i = 0; i < 4; i++) { g.beginPath(); g.ellipse(40 + i * 90, 292 + (i % 2) * 18, 52, 10, 0, 0, 7); g.fill(); }
-  g.fillStyle = "#d21f2e"; g.fillRect(96, 238, 148, 102); // baju merah
-  g.fillStyle = "#b8151f"; g.fillRect(96, 238, 148, 20);
-  g.fillStyle = "#c98d5e"; g.fillRect(152, 208, 36, 40); // leher
-  g.beginPath(); g.arc(170, 158, 62, 0, 7); g.fill(); // wajah
-  g.fillStyle = "#14100c"; g.beginPath(); g.arc(170, 140, 64, Math.PI, Math.PI * 2); g.fill(); // rambut
-  g.fillRect(104, 128, 132, 16);
-  g.fillStyle = "#14161a"; g.fillRect(104, 108, 132, 24); // topi
-  g.fillRect(88, 128, 164, 10);
-  g.fillStyle = "#1c1c20";
-  g.beginPath(); g.arc(146, 160, 6, 0, 7); g.arc(194, 160, 6, 0, 7); g.fill();
-  g.strokeStyle = "#8a5a34"; g.lineWidth = 5;
-  g.beginPath(); g.arc(170, 178, 22, 0.3, Math.PI - 0.3); g.stroke();
+const audio = createAudio();
+const hud = createHud();
+const input = createInput();
+const city = createCity(scene, rng, stage.envMap);
+const crowd = createCrowd(THREE, scene, rng, CITY);
+const player = createPlayer(scene, rng, stage.envMap, city.colliders);
+const radio = createRadio(() => {});
+const police = createPolice(scene, stage.envMap, rng, (line) => hud.dispatch(line));
+const combat = createCombat(scene, rng, audio, {
+  onPlayerHit: (dmg) => {
+    if (S.armor > 0) { const absorbed = Math.min(S.armor, dmg * 0.7); S.armor -= absorbed; S.hp -= dmg - absorbed; }
+    else S.hp -= dmg;
+  },
+  onHit: () => audio.hit(),
+  onKill: () => { S.rep += 1; },
+  onShot: () => { if (police.wanted < 1) police.crime(1); },
+});
+const shops = createShops(S, { player, hud, combat, audio });
+
+// traffic: two-way flow on the avenues, the coast road and the streets
+const traffic = [];
+{
+  const trng = makeRng(WORLD_SEED + 7);
+  const lanes = [];
+  for (const z of [...CITY.avenuesZ, CITY.coastRoadZ]) {
+    lanes.push({ axis: "x", at: z - 3.6, dir: 1, from: CITY.minX, to: CITY.maxX });
+    lanes.push({ axis: "x", at: z + 3.6, dir: -1, from: CITY.maxX, to: CITY.minX });
+  }
+  for (const x of [CITY.streetsX[1], CITY.streetsX[3], CITY.streetsX[5], CITY.streetsX[6]]) {
+    lanes.push({ axis: "z", at: x - 3.6, dir: 1, from: CITY.minZ, to: CITY.coastRoadZ });
+    lanes.push({ axis: "z", at: x + 3.6, dir: -1, from: CITY.coastRoadZ, to: CITY.minZ });
+  }
+  for (let i = 0; i < 16; i++) {
+    const lane = lanes[i % lanes.length];
+    const type = VEHICLE_TYPES[i % VEHICLE_TYPES.length];
+    const v = trafficVehicle(stage.envMap, trng, type);
+    scene.add(v.group);
+    const u = trng.range(0.08, 0.92);
+    const pos = lane.from + (lane.to - lane.from) * u;
+    traffic.push({
+      v, lane, x: lane.axis === "x" ? pos : lane.at, z: lane.axis === "x" ? lane.at : pos,
+      speed: trng.range(8, 13.5), heading: lane.axis === "x" ? (lane.dir > 0 ? Math.PI / 2 : -Math.PI / 2) : (lane.dir > 0 ? 0 : Math.PI),
+    });
+  }
+}
+function updateTraffic(dt, t) {
+  for (const c of traffic) {
+    const d = c.speed * c.lane.dir * dt;
+    if (c.lane.axis === "x") {
+      c.x += d;
+      if (c.x > CITY.maxX + 12) c.x = CITY.minX - 12;
+      if (c.x < CITY.minX - 12) c.x = CITY.maxX + 12;
+    } else {
+      c.z += d;
+      if (c.z > CITY.coastRoadZ + 12) c.z = CITY.minZ - 12;
+      if (c.z < CITY.minZ - 12) c.z = CITY.coastRoadZ + 12;
+    }
+    c.v.group.position.set(c.x, 0, c.z);
+    c.v.group.rotation.y = c.heading - Math.PI / 2;
+    c.v.speed = c.speed; c.v.steer = 0;
+    updateVehicleVisual(c.v, dt, t);
+  }
+}
+
+// courier for the chase mission: flees along the coast road and avenues
+function makeCourier(x, z) {
+  const v = trafficVehicle(stage.envMap, makeRng(WORLD_SEED + 99), VEHICLE_TYPES[1]);
+  scene.add(v.group);
+  const c = {
+    x, z, heading: Math.PI / 2, speed: 15, group: v.group,
+    update(dt, pl) {
+      const away = Math.atan2(c.x - pl.x, c.z - pl.z);
+      let target = away;
+      if (c.x > CITY.maxX - 30) target = Math.PI; // turn back west... via -z? keep on roads:
+      if (c.x > CITY.maxX - 30) target = -Math.PI / 2;
+      if (c.x < CITY.minX + 30) target = Math.PI / 2;
+      let dh = target - c.heading;
+      while (dh > Math.PI) dh -= Math.PI * 2;
+      while (dh < -Math.PI) dh += Math.PI * 2;
+      c.heading += THREE.MathUtils.clamp(dh, -1.4 * dt, 1.4 * dt);
+      c.x += Math.sin(c.heading) * c.speed * dt;
+      c.z += Math.cos(c.heading) * c.speed * dt;
+      c.z = THREE.MathUtils.clamp(c.z, CITY.minZ + 10, CITY.coastRoadZ + 4);
+      v.group.position.set(c.x, 0, c.z);
+      v.group.rotation.y = c.heading - Math.PI / 2;
+      v.speed = c.speed;
+      updateVehicleVisual(v, dt, performance.now() / 1000);
+    },
+  };
+  return c;
+}
+
+const missions = createMissions(scene, S, { hud, combat, police, player, audio, makeCourier });
+
+// save / load slot rows in the pause menu
+{
+  const wrap = document.getElementById("save-slots");
+  for (let slot = 1; slot <= 3; slot++) {
+    const row = document.createElement("div");
+    row.className = "slot-row";
+    const info = document.createElement("div");
+    info.className = "slot-info";
+    info.textContent = `Slot ${slot}: ${slotSummary(slot)}`;
+    const saveBtn = document.createElement("button");
+    saveBtn.className = "menu-btn"; saveBtn.textContent = "SIMPAN";
+    saveBtn.addEventListener("click", () => {
+      saveGame(slot, {
+        money: S.money, rep: S.rep, missionIndex: missions.index,
+        upgrades: S.upgrades, hp: S.hp, armor: S.armor, x: player.x, z: player.z,
+      });
+      info.textContent = `Slot ${slot}: ${slotSummary(slot)}`;
+      hud.notify(`Progres disimpan di slot ${slot}.`);
+    });
+    const loadBtn = document.createElement("button");
+    loadBtn.className = "menu-btn"; loadBtn.textContent = "MUAT";
+    loadBtn.addEventListener("click", () => {
+      const d = loadGame(slot);
+      if (!d) { hud.notify("Slot itu masih kosong."); return; }
+      S.money = d.money; S.rep = d.rep; S.upgrades = d.upgrades || S.upgrades;
+      S.hp = d.hp ?? 100; S.armor = d.armor ?? 0;
+      player.nosUnlocked = !!S.upgrades.nos;
+      player.teleport(d.x ?? 8, d.z ?? 44, 0);
+      if (!missions.done) missions.start(Math.min(9, d.missionIndex ?? 0));
+      hud.notify(`Slot ${slot} dimuat.`);
+    });
+    row.append(info, saveBtn, loadBtn);
+    wrap.append(row);
+  }
+}
+
+// ---------- title portrait: original painted artwork of Raka ----------
+(function drawPortrait() {
+  const cv = document.getElementById("portrait");
+  const g = cv.getContext("2d");
+  const sky = g.createLinearGradient(0, 0, 0, 420);
+  sky.addColorStop(0, "#2e6da8"); sky.addColorStop(0.55, "#f2a95c"); sky.addColorStop(1, "#e2703a");
+  g.fillStyle = sky; g.fillRect(0, 0, 336, 420);
+  g.fillStyle = "#ffd76a"; g.beginPath(); g.arc(268, 84, 34, 0, 7); g.fill();
+  g.fillStyle = "rgba(255,240,210,0.5)"; g.beginPath(); g.arc(268, 84, 52, 0, 7); g.fill();
+  g.fillStyle = "#31435c";
+  for (const [x, h] of [[8, 120], [44, 170], [86, 100], [238, 140], [286, 190], [316, 120]]) {
+    g.fillRect(x, 300 - h, 30, h + 130);
+    g.fillStyle = "#ffd98a";
+    for (let wy = 300 - h + 12; wy < 290; wy += 16) for (let wx = x + 5; wx < x + 24; wx += 9) if ((wx * wy) % 3) g.fillRect(wx, wy, 4, 6);
+    g.fillStyle = "#31435c";
+  }
+  g.fillStyle = "#1d6f7d"; g.fillRect(0, 300, 336, 120);
+  g.fillStyle = "rgba(255,255,255,0.35)";
+  for (let i = 0; i < 22; i++) g.fillRect((i * 53) % 330, 312 + (i * 29) % 90, 22, 2.4);
+  // Raka: shoulders, open red jacket, white shirt, calm face
+  g.fillStyle = "#8a5636"; g.fillRect(146, 176, 44, 40); // neck
+  g.fillStyle = "#b8352a"; // jacket
+  g.beginPath(); g.moveTo(60, 420); g.quadraticCurveTo(70, 250, 128, 214); g.lineTo(150, 420); g.fill();
+  g.beginPath(); g.moveTo(276, 420); g.quadraticCurveTo(266, 250, 208, 214); g.lineTo(186, 420); g.fill();
+  g.fillStyle = "#f0ead8"; // shirt
+  g.beginPath(); g.moveTo(140, 216); g.lineTo(196, 216); g.lineTo(186, 420); g.lineTo(150, 420); g.fill();
+  g.fillStyle = "#a06844"; // face
+  g.beginPath(); g.ellipse(168, 128, 52, 64, 0, 0, 7); g.fill();
+  g.fillStyle = "#14100c"; // hair
+  g.beginPath(); g.ellipse(168, 82, 54, 30, 0, Math.PI, 0); g.fill();
+  g.fillRect(114, 78, 108, 16);
+  g.fillStyle = "#14100c"; // brows + eyes
+  g.fillRect(130, 122, 26, 6); g.fillRect(180, 122, 26, 6);
+  g.fillRect(138, 134, 12, 6); g.fillRect(186, 134, 12, 6);
+  g.fillStyle = "rgba(90,40,20,0.6)"; g.fillRect(150, 176, 36, 5); // mouth
+  g.fillStyle = "rgba(0,0,0,0.18)"; g.fillRect(163, 140, 7, 26); // nose shade
+  g.fillStyle = "#e8b13c"; g.fillRect(158, 226, 20, 8); // necklace hint
 })();
 
-const $ = (id) => document.getElementById(id);
-const titleScreen = $("title-screen"), pauseMenu = $("pause-menu"),
-  shopMenu = $("shop-menu"), howMenu = $("how-menu"), mapOverlay = $("map-overlay");
+// ---------- flow: title, pause, map ----------
+let state = shotName ? "play" : "title";
+let paused = false;
+const titleEl = document.getElementById("title-screen");
+const hudEl = document.getElementById("hud");
+const pauseEl = document.getElementById("pause-menu");
+const wastedEl = document.getElementById("wasted");
+const crosshairEl = document.getElementById("crosshair");
 
-const hudChrome = ["hud-left", "hud-right", "minimap-wrap", "hud-speed", "crosshair", "hud-prompt"];
-function setState(s) {
-  game.state = s;
-  for (const id of hudChrome) { const n = $(id); if (n) n.style.display = (s === "title" || s === "map") ? "none" : ""; }
-  titleScreen.style.display = s === "title" ? "flex" : "none";
-  pauseMenu.classList.toggle("open", s === "pause");
-  mapOverlay.classList.toggle("open", s === "map");
-  if (s === "map") hud.drawFullMap(game);
-  if (s === "pause") {
-    $("pause-stats").textContent = `Uang $${player.money} · Reputasi ${player.rep} · Misi selesai ${missions.done}/10 · Hari ${game.day}`;
-    for (let i = 0; i < 3; i++) $("save-info-" + i).textContent = slotSummary(i);
+let started = false;
+function startGame(withStory) {
+  titleEl.style.display = "none";
+  hudEl.style.display = "block";
+  state = "play";
+  audio.unlock(); radio.start();
+  if (!started) { // bring the hero car to Raka's spawn for the first drive
+    started = true;
+    player.placeCar(20, 40, Math.PI / 2);
+    player.teleport(8, 44, Math.PI / 2);
   }
+  if (withStory && !missions.active && !missions.done) missions.start(S.missionIndex || 0);
 }
-function startPlay() {
-  audio.ensure();
-  radio.playing = true;
-  setState("play");
-  if (!missions.active && missions.current) {
-    const started = missions.start();
-    if (started) hud.dialog(started.dialog[0], started.dialog[1]);
-  }
-}
-$("btn-play").addEventListener("click", startPlay);
-$("btn-how").addEventListener("click", () => howMenu.classList.add("open"));
-$("btn-how-close").addEventListener("click", () => howMenu.classList.remove("open"));
-$("btn-load").addEventListener("click", () => { const d = loadGame(0); if (d) { applyState(game, d); startPlay(); } else hud.notify("Slot 1 kosong"); });
-$("btn-resume").addEventListener("click", () => setState("play"));
-$("btn-quit-title").addEventListener("click", () => setState("title"));
-$("btn-shop-close").addEventListener("click", () => { shopMenu.classList.remove("open"); setState("play"); });
-for (let i = 0; i < 3; i++) {
-  $("btn-save" + i).addEventListener("click", () => { saveGame(i, collectState(game)); hud.notify("Tersimpan di slot " + (i + 1)); setState("pause"); });
-  $("btn-load" + i).addEventListener("click", () => { const d = loadGame(i); if (d) { applyState(game, d); setState("play"); } });
-}
+document.getElementById("btn-start").addEventListener("click", () => startGame(true));
+document.getElementById("btn-free").addEventListener("click", () => startGame(false));
+document.getElementById("btn-how").addEventListener("click", () => {
+  const p = document.getElementById("how-panel");
+  p.style.display = p.style.display === "block" ? "none" : "block";
+});
+document.getElementById("btn-resume").addEventListener("click", () => { paused = false; pauseEl.style.display = "none"; });
+document.getElementById("btn-quit-title").addEventListener("click", () => {
+  paused = false; pauseEl.style.display = "none";
+  state = "title"; titleEl.style.display = "flex"; hudEl.style.display = "none";
+});
+if (!shotName) titleEl.style.display = "flex";
 
-function openShop(shop) {
-  const items = shops.menuFor(shop, player, combat);
-  $("shop-title").textContent = shop.name + ` — $${player.money}`;
-  const box = $("shop-items");
-  box.innerHTML = "";
-  if (!items.length) box.innerHTML = "<p>Semua upgrade sudah terpasang.</p>";
-  for (const item of items) {
-    const b = document.createElement("button");
-    b.className = "mbtn";
-    b.innerHTML = `${item.label}<small>${item.desc}</small>`;
-    b.addEventListener("click", () => { hud.notify(item.buy()); $("shop-title").textContent = shop.name + ` — $${player.money}`; });
-    box.appendChild(b);
+const shotCtx = { S, player, police, combat, hud, missions, camera, traffic, shotView: null, fixedCamera: false };
+if (shotName) {
+  if (shotName === "title") {
+    state = "title";
+    titleEl.style.display = "flex";
+    hudEl.style.display = "none";
+  } else {
+    hudEl.style.display = "block";
   }
-  shopMenu.classList.add("open");
-  setState("shop");
+  setupShot(shotName, shotCtx);
+  S.wanted = police.wanted;
 }
 
-function nearestCar() {
-  let best = null, bd = 5;
-  for (const c of parkedCars) {
-    const d = c.mesh.position.distanceTo(player.pos);
-    if (d < bd) { bd = d; best = c; }
-  }
-  return best;
+// title backdrop camera: slow orbit around the parked hero car
+let titleAngle = 0.6;
+function titleCamera(dt) {
+  if (shotCtx.fixedCamera) return;
+  titleAngle += dt * 0.05;
+  const cx = 30 + Math.cos(titleAngle) * 10.5;
+  const cz = CITY.coastRoadZ + 6 + Math.sin(titleAngle) * 10.5;
+  camera.position.lerp(new THREE.Vector3(cx, 2.1, cz), Math.min(1, dt * 2));
+  camera.lookAt(30, 1.0, CITY.coastRoadZ + 6);
+  player.figure.group.rotation.y = -2.2 + Math.sin(titleAngle * 0.7) * 0.1;
+}
+if (!shotName) { // the live title scene behind the menu
+  player.placeCar(30, CITY.coastRoadZ + 6.5, Math.PI / 2 + 0.5);
+  player.teleport(26.8, CITY.coastRoadZ + 4.2, -2.2);
 }
 
-function interact() {
-  if (player.driving) return;
-  const shop = shops.near;
-  if (shop) { openShop(shop); return; }
-  if (!missions.active && missions.current) {
-    const spot = missions.targetPos();
-    if (Math.hypot(player.pos.x - spot.x, player.pos.z - spot.z) < 6) {
-      const started = missions.start();
-      if (started) hud.dialog(started.dialog[0], started.dialog[1]);
-      return;
-    }
-  }
-  const car = nearestCar();
-  if (car) {
-    player.enterCar(car);
-    police.addHeat(2);
-    hud.notify("Mengemudi: " + car.spec.name);
-  }
+function respawn() {
+  S.hp = 100; S.armor = 0;
+  S.money = Math.max(0, S.money - 200);
+  police.reset(); S.wanted = 0;
+  if (player.mode === "car") player.exitCar();
+  player.teleport(44, 96, 0);
+  wastedEl.style.display = "none";
+  hud.notify("Kau terbangun di depan Warung Senja. -$200 untuk biaya berobat.");
 }
 
-// adegan screenshot atau mulai normal
-const shot = shotName();
-if (shot) {
-  game.shotFixed = true;
-  const s = setupShot(game, shot);
-  setState(s === "map" ? "map" : s === "title" ? "title" : "play");
-  if (shot === "chase" || shot === "shootout") { titleScreen.style.display = "none"; game.state = "play"; }
-} else {
-  setState("title");
-}
-
-let last = performance.now();
-let elapsed = 0;
+let frames = 0, last = performance.now(), bustShown = 0;
 function loop(now) {
   requestAnimationFrame(loop);
   let dt = (now - last) / 1000;
   last = now;
-  dt = Math.max(0, Math.min(0.05, dt)); // clamp: tidak negatif, maks 0.05
-  const t = game.shotFixed ? 2.35 : (elapsed += dt);
+  dt = Math.min(Math.max(dt, 0), 0.05); // clamped, never negative, never huge
+  const t = now / 1000;
+  frames++;
 
-  if (game.state === "play" && !game.shotFixed) {
-    game.clockMin += dt * 2;
-    if (game.clockMin > 19 * 60) { game.clockMin = 6 * 60 + 30; game.day++; }
-    if (input.justPressed("Escape", "KeyP")) setState("pause");
-    else if (input.justPressed("KeyM")) setState("map");
-    else if (input.justPressed("KeyE")) interact();
-    else if (input.justPressed("KeyF") && player.driving) player.exitCar();
-    else if (input.justPressed("KeyR")) { const ri = radio.next(); hud.notify(`Radio: ${ri.station} — "${ri.track}"`); }
-    else if (input.justPressed("KeyH")) audio.horn();
-    combat.switchWeapon(input);
-    player.camYaw -= (input.mouseDown && input.down("KeyQ") ? 1 : 0); // cadangan putar kamera
-    player.update(dt, input, city);
-    player.updateCamera(camera, dt, police.wanted >= 3);
-    traffic.update(dt, t);
-    pedestrians.update(dt, t);
-    shops.update(player.pos);
-    const target = player.driving ? player.pos : player.pos;
-    police.update(dt, t, target, player.speed);
-    if (police.wanted >= 2) police.cool(dt * 0.4);
-    helicopter.active = police.wanted >= 3;
-    helicopter.update(dt, t, target, police.wanted >= 4);
-    combat.tryFire(dt, input, player.pos, player.yaw, camera);
-    combat.update(dt, player.pos, camera, (dmg) => {
-      if (player.armor > 0) { player.armor = Math.max(0, player.armor - dmg); } else player.hp -= dmg;
-    });
-    const ev = missions.update(dt, t, player.pos, player);
-    if (ev?.objective) hud.notify("Objektif: " + ev.objective);
-    if (ev?.completed) {
-      audio.coin();
-      hud.notify(`Misi selesai: ${ev.completed.mission.title} +$${ev.completed.reward} · Rep +${ev.completed.rep}`, 5000);
-      if (missions.current) { const s = missions.start(); if (s) hud.dialog(s.dialog[0], s.dialog[1]); }
-    }
-    if (player.hp <= 0) {
-      player.hp = 100; player.money = Math.max(0, player.money - 100);
-      police.heat = 0; police.wanted = 0;
-      if (player.driving) player.exitCar();
-      player.pos.set(30, 0, -60);
-      hud.notify("Raka pingsan dan terbangun di klinik. -$100");
-    }
-    audio.setEngine(Math.abs(player.speed) / 60, !!player.driving);
-    audio.setSiren(police.wanted > 0, t);
-    radio.update(dt);
-    hud.update(dt, game);
-  } else if (game.shotFixed) {
-    if (shot === "map") hud.drawFullMap(game);
-    else if (shot !== "title") hud.update(0, game);
-  } else if (game.state === "map") {
-    if (input.justPressed("KeyM", "Escape")) setState("play");
-    hud.drawFullMap(game);
-  } else if (game.state === "pause") {
-    if (input.justPressed("Escape", "KeyP")) setState("play");
-  } else if (game.state === "title") {
-    if (input.justPressed("Enter")) startPlay();
-    // kamera judul perlahan mengorbit pemandangan kota
-    if (!game.shotFixed) {
-      camera.position.set(Math.sin(t * 0.05) * 30, 9, 60 + Math.cos(t * 0.05) * 8);
-      camera.lookAt(0, 2, 10);
-      traffic.update(dt, t);
-      pedestrians.update(dt, t);
-    }
+  if (state === "title") {
+    titleCamera(dt);
+    city.update(t, dt); crowd.update(dt); updateTraffic(dt, t);
+    stage.followShadow(player.figure.group.position);
+    stage.update(dt, t);
+    stage.renderer.render(scene, camera);
+    if (shotName && frames > 10 && !window.__tcReady) window.__tcReady = true;
+    return;
   }
-  city.update(t);
-  render.update(t);
-  render.render();
+  if (paused) { stage.renderer.render(scene, camera); return; }
+
+  // ---- live game ----
+  if (input.hit("Escape")) {
+    if (hud.mapOpen) hud.showMap(false);
+    else if (shops.isOpen) shops.close();
+    else { paused = true; pauseEl.style.display = "flex"; }
+  }
+  if (input.hit("KeyM")) hud.showMap(!hud.mapOpen);
+  if (player.mode === "car") { if (input.hit("KeyE")) player.exitCar(); }
+  else if (player.nearCar() && !shops.isOpen) { if (input.hit("KeyE")) player.enterCar(); }
+  if (input.hit("Digit1")) combat.switchWeapon(0);
+  if (input.hit("Digit2")) combat.switchWeapon(1);
+  if (input.hit("Digit3")) combat.switchWeapon(2);
+  if (input.hit("KeyR")) { if (player.mode === "car") radio.cycle(); else combat.reload(); }
+  if (input.hit("KeyH")) audio.horn();
+
+  S.timeMin += dt * 1.0;
+  if (S.timeMin >= 1440) { S.timeMin -= 1440; S.day = (S.day + 1) % 7; }
+
+  const frozen = shops.isOpen; // the world keeps living behind the map
+  if (!frozen) {
+    player.update(dt, input, camera, audio);
+    combat.inputFiring = input.firing;
+    combat.tryShoot(dt, player, camera);
+    combat.update(dt, t, player, camera);
+    police.update(dt, t, player, audio);
+    missions.update(dt, t);
+    crowd.update(dt);
+    updateTraffic(dt, t);
+    radio.update(dt);
+  }
+  shops.update(input);
+  city.update(t, dt);
+  stage.followShadow(new THREE.Vector3(player.x, 0, player.z));
+  stage.update(dt, t);
+  S.wanted = police.wanted;
+
+  if (S.hp <= 0 && !bustShown) { bustShown = 1; wastedEl.style.display = "flex"; setTimeout(respawn, 2400); }
+  if (police.bustTimer > 2.5 && !bustShown) {
+    bustShown = 1; wastedEl.style.display = "flex";
+    wastedEl.querySelector("span").textContent = "TERTANGKAP";
+    setTimeout(() => { bustShown = 0; police.bustTimer = 0; respawn(); }, 2400);
+  }
+  if (bustShown && S.hp > 0) bustShown = 0;
+
+  const w = combat.weapon;
+  const ammoText = w.id === "fist" ? "—" : `${combat.ammo[w.id].mag} / ${combat.ammo[w.id].reserve}`;
+  const hh = String(Math.floor(S.timeMin / 60)).padStart(2, "0");
+  const mm = String(Math.floor(S.timeMin % 60)).padStart(2, "0");
+  const view = shotCtx.shotView || {};
+  hud.update(S, {
+    clock: `${DAYS[S.day]} ${hh}:${mm}`,
+    missionTitle: view.missionTitle || (missions.active ? `MISI ${missions.index + 1} — ${missions.current.title}` : (missions.done ? "CERITA SELESAI" : "KELILING KOTA")),
+    objective: view.objective || missions.objectiveText() || shops.nearestHint() || (player.mode === "foot" && player.nearCar() ? "Tekan E untuk masuk mobil" : ""),
+    weaponName: w.name, ammoText,
+    driving: player.mode === "car",
+    speedKmh: player.speedKmh, nos: player.nos,
+    radioText: `📻 <b>${radio.station.name} ${radio.station.freq}</b> ♪ ${radio.track}`,
+    hint: player.mode === "car" ? "" : (shops.nearestHint() || ""),
+    entities: {
+      player: { x: player.x, z: player.z, heading: player.heading },
+      police: police.units, traffic,
+      mission: missions.markerPos(),
+    },
+  });
+  crosshairEl.style.display = player.mode === "foot" && combat.weapon.id !== "fist" ? "block" : "none";
+
+  stage.renderer.render(scene, camera);
   input.endFrame();
-  window.__shotReady = true;
+  if (shotName && frames > 10 && !window.__tcReady) window.__tcReady = true;
 }
 requestAnimationFrame(loop);
-addEventListener("resize", () => render.resize());
-addEventListener("pointerdown", () => audio.ensure(), { once: true });
+
+window.__tc = {
+  get state() { return state; },
+  get speedKmh() { return player.speedKmh; },
+  get mode() { return player.mode; },
+  get ammo() { const w = combat.weapon; return w.id === "fist" ? null : combat.ammo[w.id].mag; },
+  get errors() { return errors; },
+  player, combat, police, S,
+};
