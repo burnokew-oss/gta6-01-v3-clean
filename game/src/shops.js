@@ -1,42 +1,54 @@
 // shops.js — garasi (upgrade mesin, NOS, cat), toko senjata, toko pakaian,
-// warung makan pemulih HP. Interaksi dengan tombol E di dekat toko.
-import { SHOPS } from "./config.js";
+// warung makan pemulih HP. Titik toko di dunia + logika beli.
+import { GARAGE_UPGRADES } from "./config.js";
+
+export const SHOP_POINTS = [
+  { id: "garage", name: "Garasi Bengkel Pelita", x: -52, z: 52, color: "#ffb340" },
+  { id: "weapons", name: "Toko Senjata Ombak", x: 52, z: -52, color: "#ff5964" },
+  { id: "clothes", name: "Butik Melati", x: -46, z: -58, color: "#f15bb5" },
+  { id: "food", name: "Warung Senja", x: 58, z: 46, color: "#7cff4f" },
+];
 
 export class Shops {
-  constructor(player, combat) {
-    this.list = SHOPS;
-    this.player = player;
-    this.combat = combat;
-    this.clothesIdx = 0;
-    this.paintIdx = 0;
-    this.notice = "";
+  constructor() {
+    this.owned = new Set();
+    this.near = null;
   }
-  nearest() {
-    let best = null, bestD = 9;
-    for (const s of this.list) {
-      const d = Math.hypot(this.player.x - s.x, this.player.z - s.z);
-      if (d < bestD) { best = s; bestD = d; }
+  update(playerPos) {
+    this.near = null;
+    for (const s of SHOP_POINTS) {
+      if (Math.hypot(playerPos.x - s.x, playerPos.z - s.z) < 5) this.near = s;
     }
-    return best;
+    return this.near;
   }
-  interact() {
-    const s = this.nearest();
-    if (!s) return null;
-    const p = this.player;
-    if (s.kind === "garage") {
-      if (p.engineLevel < 3 && p.money >= 300) { p.money -= 300; p.engineLevel += 1; this.notice = "Mesin naik ke level " + p.engineLevel; }
-      else if (p.nosLevel < 3 && p.money >= 200) { p.money -= 200; p.nosLevel += 1; p.nos = 100; this.notice = "NOS ditingkatkan ke level " + p.nosLevel; }
-      else this.notice = "Garasi Pelita: upgrade penuh atau uang kurang";
-    } else if (s.kind === "weapon") {
-      if (p.money >= 120) { p.money -= 120; this.combat.ammo.pistol += 24; this.combat.ammo.shotgun += 8; this.notice = "Amunisi pistol +24, shotgun +8"; }
-      else this.notice = "Toko Senjata Arus: uang kurang untuk amunisi";
-    } else if (s.kind === "clothes") {
-      this.clothesIdx = (this.clothesIdx + 1) % 4;
-      this.notice = "Butik Melati: gaya pakaian diganti (" + (this.clothesIdx + 1) + "/4)";
-    } else if (s.kind === "food") {
-      if (p.money >= 25) { p.money -= 25; p.hp = Math.min(100, p.hp + 40); this.notice = "Warung Senja: HP +40, perut kenyang"; }
-      else this.notice = "Warung Senja: uang kurang untuk makan";
+  menuFor(shop, player, combat) {
+    if (!shop) return [];
+    if (shop.id === "garage") {
+      return GARAGE_UPGRADES.filter((u) => !this.owned.has(u.id)).map((u) => ({
+        label: `${u.name} — $${u.price}`,
+        desc: u.desc,
+        buy: () => {
+          if (player.money < u.price) return "Uang tidak cukup.";
+          player.money -= u.price; this.owned.add(u.id);
+          return `${u.name} terpasang!`;
+        },
+      }));
     }
-    return s;
+    if (shop.id === "weapons") {
+      return [
+        { label: "Amunisi Pistol +30 — $60", desc: "Isi ulang pistol P9", buy: () => { if (player.money < 60) return "Uang tidak cukup."; player.money -= 60; combat.ammo.pistol += 30; return "Amunisi bertambah."; } },
+        { label: "Amunisi Shotgun +8 — $90", desc: "Isi ulang shotgun laras", buy: () => { if (player.money < 90) return "Uang tidak cukup."; player.money -= 90; combat.ammo.shotgun += 8; return "Amunisi bertambah."; } },
+        { label: "Armor Badan — $150", desc: "+50 armor", buy: () => { if (player.money < 150) return "Uang tidak cukup."; player.money -= 150; player.armor = Math.min(100, player.armor + 50); return "Armor terpasang."; } },
+      ];
+    }
+    if (shop.id === "food") {
+      return [
+        { label: "Nasi Ikan Bakar — $25", desc: "Pulihkan 40 HP", buy: () => { if (player.money < 25) return "Uang tidak cukup."; player.money -= 25; player.hp = Math.min(100, player.hp + 40); return "Segar kembali!"; } },
+        { label: "Es Teh Segar — $8", desc: "Pulihkan 12 HP", buy: () => { if (player.money < 8) return "Uang tidak cukup."; player.money -= 8; player.hp = Math.min(100, player.hp + 12); return "Dingin dan manis."; } },
+      ];
+    }
+    return [
+      { label: "Kemeja Pantai Cerah — $120", desc: "Gaya baru Raka", buy: () => { if (player.money < 120) return "Uang tidak cukup."; player.money -= 120; player.rep += 1; return "Tampilan baru! Reputasi +1."; } },
+    ];
   }
 }

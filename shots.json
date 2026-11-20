@@ -1,1 +1,1 @@
-[{"file":"1-chase.jpg","name":"chase"},{"file":"2-shootout.jpg","name":"shootout"},{"file":"3-map.jpg","name":"map"},{"file":"4-title.jpg","name":"title"}]
+{"shots":[{"file":"screenshots/1-chase.jpg","name":"chase","url":"http://localhost:8080/?shot=chase"},{"file":"screenshots/2-shootout.jpg","name":"shootout","url":"http://localhost:8080/?shot=shootout"},{"file":"screenshots/3-map.jpg","name":"map","url":"http://localhost:8080/?shot=map"},{"file":"screenshots/4-title.jpg","name":"title","url":"http://localhost:8080/?shot=title"}]}

@@ -1,54 +1,57 @@
 // audio.js — efek suara prosedural WebAudio: mesin, klakson, tembakan,
-// sirene, langkah, dan koin. Konteks dibuat lazily pada interaksi pertama.
-export class AudioEngine {
+// sirene, langkah, koin. Konteks dibuat setelah gestur pengguna pertama.
+export class AudioFx {
   constructor() {
     this.ctx = null;
-    this.engineOsc = null;
-    this.engineGain = null;
+    this.engineOsc = null; this.engineGain = null;
+    this.sirenOsc = null; this.sirenGain = null;
   }
   ensure() {
     if (this.ctx) { if (this.ctx.state === "suspended") this.ctx.resume(); return; }
-    const AC = window.AudioContext || window.webkitAudioContext;
-    if (!AC) return;
-    this.ctx = new AC();
+    try {
+      this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const g = this.ctx.createGain(); g.gain.value = 0; g.connect(this.ctx.destination);
+      const o = this.ctx.createOscillator(); o.type = "sawtooth"; o.frequency.value = 60;
+      o.connect(g); o.start();
+      this.engineOsc = o; this.engineGain = g;
+      const sg = this.ctx.createGain(); sg.gain.value = 0; sg.connect(this.ctx.destination);
+      const so = this.ctx.createOscillator(); so.type = "triangle"; so.frequency.value = 700;
+      so.connect(sg); so.start();
+      this.sirenOsc = so; this.sirenGain = sg;
+    } catch { this.ctx = null; }
   }
-  tone(freq, dur, type, vol, when = 0) {
+  setEngine(speedRatio, driving) {
     if (!this.ctx) return;
-    const t0 = this.ctx.currentTime + when;
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
-    osc.type = type || "sine";
-    osc.frequency.setValueAtTime(freq, t0);
-    gain.gain.setValueAtTime(vol || 0.08, t0);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-    osc.connect(gain); gain.connect(this.ctx.destination);
-    osc.start(t0); osc.stop(t0 + dur + 0.02);
+    this.engineGain.gain.value = driving ? 0.05 + speedRatio * 0.05 : 0;
+    this.engineOsc.frequency.value = 55 + speedRatio * 165;
   }
-  shot(kind) {
+  setSiren(on, t) {
     if (!this.ctx) return;
-    if (kind === "shotgun") { this.tone(120, 0.22, "sawtooth", 0.16); this.tone(60, 0.3, "square", 0.12, 0.02); }
-    else if (kind === "pistol") { this.tone(220, 0.1, "sawtooth", 0.12); }
-    else this.tone(300, 0.06, "square", 0.06);
+    this.sirenGain.gain.value = on ? 0.018 : 0;
+    if (on) this.sirenOsc.frequency.value = 700 + Math.sin(t * 6) * 180;
   }
-  horn() { this.tone(370, 0.25, "square", 0.07); this.tone(466, 0.25, "square", 0.06); }
-  coin() { this.tone(880, 0.09, "sine", 0.09); this.tone(1320, 0.16, "sine", 0.09, 0.08); }
-  step() { this.tone(90, 0.05, "sine", 0.03); }
-  siren(t) {
+  blip(freq, dur, type = "square", vol = 0.12) {
     if (!this.ctx) return;
-    if (Math.floor(t * 2) % 2 === 0) this.tone(660, 0.12, "triangle", 0.015);
+    const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+    o.type = type; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol, this.ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + dur);
+    o.connect(g); g.connect(this.ctx.destination);
+    o.start(); o.stop(this.ctx.currentTime + dur);
   }
-  engine(speedRatio) {
+  gunshot(big = false) {
     if (!this.ctx) return;
-    if (!this.engineOsc) {
-      this.engineOsc = this.ctx.createOscillator();
-      this.engineGain = this.ctx.createGain();
-      this.engineOsc.type = "sawtooth";
-      this.engineGain.gain.value = 0.0;
-      this.engineOsc.connect(this.engineGain);
-      this.engineGain.connect(this.ctx.destination);
-      this.engineOsc.start();
-    }
-    this.engineOsc.frequency.value = 55 + Math.abs(speedRatio) * 130;
-    this.engineGain.gain.value = 0.012 + Math.abs(speedRatio) * 0.02;
+    const len = big ? 0.28 : 0.14;
+    const buf = this.ctx.createBuffer(1, this.ctx.sampleRate * len, this.ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length);
+    const src = this.ctx.createBufferSource(); src.buffer = buf;
+    const f = this.ctx.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = big ? 900 : 1800;
+    const g = this.ctx.createGain(); g.gain.value = big ? 0.5 : 0.32;
+    src.connect(f); f.connect(g); g.connect(this.ctx.destination);
+    src.start();
   }
+  horn() { this.blip(370, 0.35, "square", 0.1); setTimeout(() => this.blip(370, 0.3, "square", 0.08), 30); }
+  step() { this.blip(90 + Math.random() * 30, 0.05, "sine", 0.05); }
+  coin() { this.blip(990, 0.09, "square", 0.1); setTimeout(() => this.blip(1320, 0.16, "square", 0.1), 70); }
 }

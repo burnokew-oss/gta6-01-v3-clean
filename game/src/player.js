@@ -1,105 +1,104 @@
-// player.js — Raka: karakter jalan kaki beranatomi penuh dan mode
-// mengemudi mobil hero, kamera orang ketiga rendah-dekat saat chase.
-import { makeCar } from "./vehicles.js";
-import { makePerson, animatePerson } from "./pedestrians.js";
-import { mulberry32 } from "./random.js";
-import { VEHICLES } from "./config.js";
+// player.js — karakter Raka: mode jalan kaki dan mengemudi, kamera orang
+// ketiga rendah-dekat saat chase, fisika mobil arkade.
+import { makePerson, poseWalk, poseStand } from "./pedestrians.js";
+import { Rng } from "./random.js";
 
 export class Player {
   constructor(scene) {
-    const rng = mulberry32(777);
-    this.avatar = makePerson(rng, { shirt: 0xd92323, pants: 0x1e3a5f, skin: 0xc98a5a });
-    this.avatar.scale.setScalar(1.06);
-    scene.add(this.avatar);
-    const heroSpec = VEHICLES[0];
-    this.car = makeCar({ color: heroSpec.color, plate: heroSpec.plate });
-    scene.add(this.car);
-    this.mode = "drive";
-    this.x = 0; this.z = 0; this.angle = 0;
+    const rng = new Rng(11);
+    this.mesh = makePerson(rng, { shirt: 0xd21f2e, sleeve: 0xb8151f, pants: 0x1e3a5c, cap: 0x14161a, skin: 0xc98d5e, hair: 0x14100c });
+    this.mesh.position.set(6, 0, 26);
+    scene.add(this.mesh);
+    this.pos = this.mesh.position;
+    this.yaw = Math.PI;
+    this.walkPhase = 0;
     this.speed = 0;
-    this.carX = -6; this.carZ = 0; this.carAngle = 0; this.carSpeed = 0;
-    this.hp = 100; this.armor = 50;
-    this.money = 850; this.rep = 12;
-    this.nos = 100; this.nosLevel = 0; this.engineLevel = 0;
-    this.placeHero(0, 0, 0);
+    this.driving = null; // referensi mobil {mesh, spec, state}
+    this.hp = 100; this.armor = 0;
+    this.money = 250; this.rep = 0;
+    this.camYaw = Math.PI;
   }
-  placeHero(x, z, angle) {
-    this.carX = x; this.carZ = z; this.carAngle = angle; this.carSpeed = 0;
-    this.x = x; this.z = z; this.angle = angle;
-    this.syncMeshes(0);
+  enterCar(car) {
+    this.driving = car;
+    this.mesh.visible = false;
   }
-  enterExit() {
-    if (this.mode === "drive") {
-      this.mode = "foot";
-      this.x = this.carX + Math.cos(this.carAngle + Math.PI / 2) * 2.2;
-      this.z = this.carZ - Math.sin(this.carAngle + Math.PI / 2) * 2.2;
-      this.avatar.visible = true;
+  exitCar() {
+    if (!this.driving) return;
+    const m = this.driving.mesh;
+    this.pos.set(m.position.x + 2.6, 0, m.position.z);
+    this.driving = null;
+    this.mesh.visible = true;
+  }
+  update(dt, input, city) {
+    if (this.driving) { this.updateDrive(dt, input); return; }
+    const ax = input.axis();
+    const moving = ax.x !== 0 || ax.y !== 0;
+    if (moving) {
+      const fwd = new THREE.Vector3(Math.sin(this.camYaw), 0, Math.cos(this.camYaw));
+      const right = new THREE.Vector3(-Math.cos(this.camYaw), 0, Math.sin(this.camYaw));
+      const move = fwd.multiplyScalar(-ax.y).addScaledVector(right, ax.x).normalize();
+      const targetYaw = Math.atan2(move.x, move.z);
+      let dy = targetYaw - this.yaw;
+      while (dy > Math.PI) dy -= Math.PI * 2;
+      while (dy < -Math.PI) dy += Math.PI * 2;
+      this.yaw += dy * Math.min(1, dt * 12);
+      const run = input.down("ShiftLeft", "ShiftRight") ? 7.4 : 4.4;
+      this.pos.addScaledVector(move, run * dt);
+      this.walkPhase += dt * run * 1.9;
+      poseWalk(this.mesh, this.walkPhase, 1);
+      this.speed = run;
     } else {
-      const d = Math.hypot(this.x - this.carX, this.z - this.carZ);
-      if (d < 4.5) { this.mode = "drive"; this.avatar.visible = false; }
+      poseStand(this.mesh);
+      this.speed = 0;
+    }
+    city.collide(this.pos, 0.5);
+    this.mesh.position.copy(this.pos);
+    this.mesh.rotation.y = this.yaw;
+  }
+  updateDrive(dt, input) {
+    const car = this.driving;
+    const st = car.state;
+    const fwdIn = (input.down("KeyW", "ArrowUp") ? 1 : 0) - (input.down("KeyS", "ArrowDown") ? 1 : 0);
+    const steer = (input.down("KeyA", "ArrowLeft") ? 1 : 0) - (input.down("KeyD", "ArrowRight") ? 1 : 0);
+    const boost = input.down("ShiftLeft", "ShiftRight") && car.upgrades?.nos ? 1.7 : 1;
+    st.speed = THREE.MathUtils.clamp(
+      st.speed + fwdIn * car.spec.accel * boost * dt - st.speed * 0.55 * dt,
+      -car.spec.topSpeed * 0.4, car.spec.topSpeed * boost);
+    if (input.down("Space")) st.speed -= st.speed * 3 * dt;
+    st.yaw += steer * dt * 1.7 * Math.sign(st.speed) * Math.min(1, Math.abs(st.speed) / 9);
+    const fwd = new THREE.Vector3(Math.sin(st.yaw), 0, Math.cos(st.yaw));
+    car.mesh.position.addScaledVector(fwd, st.speed * dt);
+    car.mesh.rotation.y = st.yaw - Math.PI / 2;
+    for (const w of car.mesh.userData.wheels) w.rotation.z -= st.speed * dt / 0.42;
+    this.pos.copy(car.mesh.position);
+    this.speed = Math.abs(st.speed);
+    this.yaw = st.yaw;
+    this.walkPhase = 0;
+  }
+  updateCamera(camera, dt, lowClose = false) {
+    if (this.driving) {
+      const st = this.driving.state;
+      const back = new THREE.Vector3(Math.sin(st.yaw), 0, Math.cos(st.yaw)).multiplyScalar(-8.2);
+      const want = this.pos.clone().add(back).add(new THREE.Vector3(0, lowClose ? 2.1 : 2.9, 0));
+      camera.position.lerp(want, Math.min(1, dt * 7));
+      const ahead = this.pos.clone().add(new THREE.Vector3(Math.sin(st.yaw), 0, Math.cos(st.yaw)).multiplyScalar(9));
+      ahead.y = 1.2;
+      camera.lookAt(ahead);
+      this.camYaw = st.yaw + Math.PI;
+    } else {
+      const back = new THREE.Vector3(Math.sin(this.camYaw), 0, Math.cos(this.camYaw)).multiplyScalar(-6.4);
+      const want = this.pos.clone().add(back).add(new THREE.Vector3(0, 3.1, 0));
+      camera.position.lerp(want, Math.min(1, dt * 8));
+      const look = this.pos.clone(); look.y = 1.5;
+      camera.lookAt(look);
     }
   }
-  update(dt, input, t) {
-    if (this.mode === "drive") {
-      const accel = 22 + this.engineLevel * 3;
-      const top = 46 + this.engineLevel * 4;
-      if (input.forward) this.carSpeed += accel * dt;
-      else if (input.back) this.carSpeed -= (this.carSpeed > 0.5 ? 30 : 10) * dt;
-      else this.carSpeed -= this.carSpeed * 0.7 * dt;
-      let boost = 1;
-      if (input.sprint && this.nos > 0 && this.carSpeed > 4) { boost = 1.45; this.nos = Math.max(0, this.nos - dt * 32); }
-      else this.nos = Math.min(100, this.nos + dt * 5);
-      this.carSpeed = Math.max(-12, Math.min(top * boost, this.carSpeed));
-      const steer = (input.left ? 1 : 0) - (input.right ? 1 : 0);
-      if (Math.abs(this.carSpeed) > 0.4) this.carAngle += steer * dt * 1.55 * Math.sign(this.carSpeed) * Math.min(1, Math.abs(this.carSpeed) / 12);
-      this.carX += Math.cos(this.carAngle) * this.carSpeed * dt;
-      this.carZ += -Math.sin(this.carAngle) * this.carSpeed * dt;
-      this.carX = Math.max(-124, Math.min(124, this.carX));
-      this.carZ = Math.max(-124, Math.min(126, this.carZ));
-      this.x = this.carX; this.z = this.carZ; this.angle = this.carAngle;
-      this.speed = this.carSpeed;
-    } else {
-      const sp = input.sprint ? 8.5 : 4.6;
-      let mx = 0, mz = 0;
-      if (input.forward) mz -= 1;
-      if (input.back) mz += 1;
-      if (input.left) mx -= 1;
-      if (input.right) mx += 1;
-      const len = Math.hypot(mx, mz) || 1;
-      if (mx || mz) {
-        this.x += (mx / len) * sp * dt;
-        this.z += (mz / len) * sp * dt;
-        this.angle = Math.atan2(-(mz / len), mx / len);
-        this.speed = sp;
-      } else this.speed = 0;
-      this.x = Math.max(-124, Math.min(124, this.x));
-      this.z = Math.max(-124, Math.min(126, this.z));
-    }
-    this.syncMeshes(t);
-  }
-  syncMeshes(t) {
-    this.car.position.set(this.carX, 0, this.carZ);
-    this.car.rotation.y = this.carAngle;
-    for (const w of this.car.userData.wheels) w.rotation.z -= this.carSpeed * 0.03;
-    if (this.mode === "drive") {
-      this.avatar.visible = false;
-    } else {
-      this.avatar.visible = true;
-      this.avatar.position.set(this.x, 0, this.z);
-      this.avatar.rotation.y = this.angle + Math.PI / 2;
-      animatePerson(this.avatar, t, this.speed > 0 ? 1 : 0);
-    }
-  }
-  camera(camera) {
-    if (this.mode === "drive") {
-      // Rendah-dekat: hero besar memenuhi bawah frame, jalan terbentang.
-      const back = 8.2, up = 2.45;
-      const fx = Math.cos(this.carAngle), fz = -Math.sin(this.carAngle);
-      camera.position.set(this.carX - fx * back, up, this.carZ - fz * back);
-      camera.lookAt(this.carX + fx * 9, 1.15, this.carZ + fz * 9);
-    } else {
-      camera.position.set(this.x - Math.cos(this.angle) * 7.5, 3.1, this.z + Math.sin(this.angle) * 7.5);
-      camera.lookAt(this.x + Math.cos(this.angle) * 6, 1.4, this.z - Math.sin(this.angle) * 6);
-    }
+  setChaseCamera(camera) { // kamera rendah-dekat deterministik untuk shot chase
+    const st = this.driving.state;
+    const back = new THREE.Vector3(Math.sin(st.yaw), 0, Math.cos(st.yaw)).multiplyScalar(-9.6);
+    camera.position.copy(this.pos).add(back).add(new THREE.Vector3(1.1, 2.35, 0));
+    const ahead = this.pos.clone().add(new THREE.Vector3(Math.sin(st.yaw), 0, Math.cos(st.yaw)).multiplyScalar(10));
+    ahead.y = 1.1;
+    camera.lookAt(ahead);
   }
 }

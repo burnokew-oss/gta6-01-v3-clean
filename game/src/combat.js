@@ -1,106 +1,119 @@
 // combat.js — senjata tinju/pistol/shotgun, musuh dengan health bar,
-// muzzle flash, dan hit feedback. Tembakan selalu mengurangi amunisi.
-import { makePerson } from "./pedestrians.js";
-import { mulberry32 } from "./random.js";
+// muzzle flash, hit feedback, pose tempur jongkok di balik penutup.
 import { WEAPONS } from "./config.js";
-import { canvasTexture } from "./city.js";
+import { Rng } from "./random.js";
+import { makePerson, poseCrouchAim } from "./pedestrians.js";
 
 export class Combat {
-  constructor(scene) {
+  constructor(scene, audio) {
     this.scene = scene;
+    this.audio = audio;
     this.weaponIdx = 1;
-    this.ammo = { pistol: WEAPONS[1].ammo, shotgun: WEAPONS[2].ammo };
+    this.ammo = { pistol: 60, shotgun: 18 };
     this.cooldown = 0;
     this.enemies = [];
     this.flashT = 0;
-    const T3 = window.THREE;
-    this.flash = new T3.Sprite(new T3.SpriteMaterial({
-      map: canvasTexture(64, 64, (g) => {
-        const rg = g.createRadialGradient(32, 32, 2, 32, 32, 30);
-        rg.addColorStop(0, "rgba(255,240,180,1)"); rg.addColorStop(0.4, "rgba(255,160,40,0.85)");
-        rg.addColorStop(1, "rgba(255,120,20,0)");
-        g.fillStyle = rg; g.fillRect(0, 0, 64, 64);
-      }),
-      transparent: true, depthWrite: false,
-    }));
-    this.flash.scale.setScalar(1.6);
-    this.flash.visible = false;
+    this.flash = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 8),
+      new THREE.MeshBasicMaterial({ color: 0xffd76a, transparent: true, opacity: 0 }));
     scene.add(this.flash);
-    this.rng = mulberry32(31337);
+    this.tracerMat = new THREE.LineBasicMaterial({ color: 0xffe9a8, transparent: true, opacity: 0 });
+    this.tracer = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), this.tracerMat);
+    scene.add(this.tracer);
+    this.onKill = null;
+    this.onCrime = null;
   }
   get weapon() { return WEAPONS[this.weaponIdx]; }
-  switchWeapon(idx) { if (idx >= 0 && idx < WEAPONS.length) this.weaponIdx = idx; }
-  spawnEnemies(cx, cz, count, spread) {
-    this.clearEnemies();
-    for (let i = 0; i < count; i++) {
-      const mesh = makePerson(this.rng, { shirt: 0x111827, pants: 0x111827, skin: 0xd9a066 });
-      const ang = -0.85 + (i / Math.max(1, count - 1)) * 1.7;
-      const dist = 9 + (i % 3) * 2.6;
-      mesh.position.set(cx + Math.cos(ang) * dist, 0, cz + Math.sin(ang) * dist);
-      mesh.rotation.y = Math.atan2(cx - mesh.position.x, cz - mesh.position.z) + Math.PI / 2;
-      this.scene.add(mesh);
-      const barBg = new window.THREE.Sprite(new window.THREE.SpriteMaterial({ color: 0x111111, depthWrite: false }));
-      barBg.scale.set(1.5, 0.2, 1); barBg.position.set(mesh.position.x, 2.25, mesh.position.z);
-      this.scene.add(barBg);
-      const bar = new window.THREE.Sprite(new window.THREE.SpriteMaterial({ color: 0xef4444, depthWrite: false }));
-      bar.scale.set(1.4, 0.13, 1); bar.position.copy(barBg.position);
-      this.scene.add(bar);
-      this.enemies.push({ mesh, bar, barBg, hp: 100, hitT: 0, alive: true });
-    }
+  spawnEnemy(x, z, hp = 60) {
+    const rng = new Rng(x * 31 + z * 17 + 500);
+    const mesh = makePerson(rng, { pants: 0x14161a });
+    mesh.position.set(x, 0, z);
+    poseCrouchAim(mesh);
+    // senjata di tangan kanan
+    const gun = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.14, 0.5), new THREE.MeshPhongMaterial({ color: 0x14161a }));
+    gun.position.set(0.1, -0.62, 0.28);
+    mesh.userData.parts.arms.R.el.add(gun);
+    this.scene.add(mesh);
+    // health bar billboard: latar gelap + isi hijau→merah
+    const barBg = new THREE.Mesh(new THREE.PlaneGeometry(1.35, 0.19), new THREE.MeshBasicMaterial({ color: 0x101216, depthTest: false }));
+    const barFg = new THREE.Mesh(new THREE.PlaneGeometry(1.25, 0.12), new THREE.MeshBasicMaterial({ color: 0x53e04f, depthTest: false }));
+    barBg.position.set(x, 2.15, z); barFg.position.set(x, 2.15, z + 0.01);
+    this.scene.add(barBg, barFg);
+    const e = { mesh, hp, maxHp: hp, barBg, barFg, alive: true, fireT: rng.float(0.5, 2) };
+    this.enemies.push(e);
+    return e;
   }
   clearEnemies() {
-    for (const e of this.enemies) { this.scene.remove(e.mesh); this.scene.remove(e.bar); this.scene.remove(e.barBg); }
+    for (const e of this.enemies) { this.scene.remove(e.mesh, e.barBg, e.barFg); }
     this.enemies = [];
   }
-  tryShoot(origin, angle, onEvent) {
+  tryFire(dt, input, fromPos, aimYaw, camera) {
+    this.cooldown -= dt;
+    this.flashT -= dt;
+    this.flash.material.opacity = Math.max(0, this.flashT * 6);
+    this.tracerMat.opacity = Math.max(0, this.flashT * 3);
     const w = this.weapon;
-    if (this.cooldown > 0) return false;
-    if (w.ammo > 0) {
-      const key = w.id;
-      if (this.ammo[key] <= 0) { onEvent && onEvent("empty", w); return false; }
-      this.ammo[key] -= 1;
-    }
+    if (w.id !== "fist" && input.justPressed("Digit1", "Digit2", "Digit3")) { /* ditangani switchWeapon */ }
+    if (!input.mouseDown || this.cooldown > 0) return null;
+    if (w.id !== "fist" && this.ammo[w.id] <= 0) return null;
     this.cooldown = w.rate;
-    this.flashT = 0.07;
-    const fx = origin.x + Math.cos(angle) * 1.1, fz = origin.z - Math.sin(angle) * 1.1;
-    this.flash.position.set(fx, 1.35, fz);
-    this.flash.visible = true;
-    let best = null, bestD = w.range;
+    if (w.id !== "fist") this.ammo[w.id]--;
+    this.audio?.gunshot(w.id === "shotgun");
+    // arah hadap pemain: vektor (sin yaw, 0, cos yaw)
+    const dir = new THREE.Vector3(Math.sin(aimYaw), 0, Math.cos(aimYaw)).normalize();
+    const origin = fromPos.clone(); origin.y = 1.45;
+    this.flash.position.copy(origin).addScaledVector(dir, 0.7);
+    this.flashT = 0.14;
+    let best = null, bestDist = w.range;
     for (const e of this.enemies) {
       if (!e.alive) continue;
-      const dx = e.mesh.position.x - origin.x, dz = e.mesh.position.z - origin.z;
-      const d = Math.hypot(dx, dz);
-      const dirA = Math.atan2(-dz, dx);
-      let diff = Math.abs(dirA - angle);
-      while (diff > Math.PI) diff = Math.abs(diff - Math.PI * 2);
-      if (d < bestD && diff < 0.3) { best = e; bestD = d; }
+      const to = e.mesh.position.clone().sub(fromPos); to.y = 0;
+      const d = to.length();
+      if (d > bestDist) continue;
+      const dot = to.normalize().dot(dir);
+      if (dot > 0.86) { best = e; bestDist = d; }
     }
+    const end = origin.clone().addScaledVector(dir, best ? bestDist : w.range * 0.7);
+    end.y = 1.3;
+    this.tracer.geometry.setFromPoints([origin.clone().addScaledVector(dir, 0.7), end]);
     if (best) {
       best.hp -= w.damage;
-      best.hitT = 0.18;
-      best.bar.scale.x = Math.max(0.02, 1.4 * (best.hp / 100));
-      best.bar.material.color.setHex(best.hp > 45 ? 0xef4444 : 0xf97316);
-      if (best.hp <= 0) {
+      best.mesh.position.addScaledVector(dir, 0.24); // hit feedback: terdorong
+      if (best.hp <= 0 && best.alive) {
         best.alive = false;
-        best.mesh.rotation.z = Math.PI / 2;
+        best.mesh.rotation.x = -Math.PI / 2;
         best.mesh.position.y = 0.25;
-        best.bar.visible = false; best.barBg.visible = false;
-        onEvent && onEvent("down", best);
-      } else onEvent && onEvent("hit", best);
+        best.barBg.visible = best.barFg.visible = false;
+        this.onKill?.(best);
+      }
+      this.onCrime?.(6);
+      return best;
     }
-    onEvent && onEvent("shot", w);
-    return true;
+    return null;
   }
-  update(dt, t) {
-    this.cooldown = Math.max(0, this.cooldown - dt);
-    this.flashT -= dt;
-    if (this.flashT <= 0) this.flash.visible = false;
+  switchWeapon(input) {
+    if (input.justPressed("Digit1")) this.weaponIdx = 0;
+    if (input.justPressed("Digit2")) this.weaponIdx = 1;
+    if (input.justPressed("Digit3")) this.weaponIdx = 2;
+  }
+  update(dt, playerPos, camera, onPlayerHit) {
     for (const e of this.enemies) {
+      e.barBg.lookAt(camera.position);
+      e.barFg.lookAt(camera.position);
       if (!e.alive) continue;
-      e.hitT = Math.max(0, e.hitT - dt);
-      const s = e.hitT > 0 ? 1.12 : 1;
-      e.mesh.scale.setScalar(s);
+      const ratio = Math.max(0, e.hp / e.maxHp);
+      e.barFg.scale.x = Math.max(0.001, ratio);
+      e.barFg.material.color.setHSL(ratio * 0.33, 0.85, 0.5);
+      e.mesh.lookAt(playerPos.x, 0, playerPos.z);
+      e.fireT -= dt;
+      const d = e.mesh.position.distanceTo(playerPos);
+      if (e.fireT <= 0 && d < 42) {
+        e.fireT = 1.1 + Math.random() * 0.9;
+        this.audio?.gunshot(false);
+        if (Math.random() < 0.4) onPlayerHit?.(5);
+      }
     }
   }
-  aliveCount() { return this.enemies.filter((e) => e.alive).length; }
+  setShootoutPose() {
+    for (const e of this.enemies) poseCrouchAim(e.mesh);
+  }
 }

@@ -1,53 +1,25 @@
-# Teluk Cerah
+# burnokew-oss/gta6-01-v3-clean
 
 [![make.fun · gta6-01](https://make.fun/badge/gta6-01.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 [![rank](https://make.fun/badge/gta6-01/burnokew-oss/gta6-01-v3-clean/rank.svg)](https://make.fun/bounty/gta6-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 [![reward](https://make.fun/badge/gta6-01/burnokew-oss/gta6-01-v3-clean/reward.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 
-[![Kompetisi make.fun gta6-01](https://img.shields.io/badge/make.fun-gta6--01%20Make%20GTA%206-6c3df4)](https://make.fun/c/gta6-01)
-[![Peringkat berbayar](https://img.shields.io/badge/rank-top%20100%20berbayar-f59e0b)](https://make.fun/c/gta6-01)
-[![Total hadiah](https://img.shields.io/badge/reward-%241%2C666%20USDC-16a34a)](https://make.fun/c/gta6-01)
+**Teluk Cerah — Kota Matahari Terbit.** Game open-world crime 3D orisinal yang dimainkan di browser. Kamu adalah Raka, perantau yang pulang ke kota pesisir tropis Teluk Cerah: kota terang benderang di bawah matahari senja keemasan, dengan jalanan basah yang memantulkan neon seperti cermin, pasar ikan, dermaga, mercusuar, menara jam, dan pelabuhan.
 
-**Teluk Cerah** adalah game open-world crime 3D orisinal yang berjalan di
-browser. Kamu berperan sebagai **Raka**, perantau yang pulang ke kota pesisir
-tropis Teluk Cerah: curi mobil, rampok toko, kabur dari kejaran polisi darat
-dan helikopter, selesaikan 10 misi cerita, beli upgrade, dan simpan progresmu.
+Jalankan 10 misi cerita berurutan — curi mobil, rampok toko, kejar-kejaran, baku tembak, antar paket, balapan jalanan, sampai pertempuran penutup di Pelabuhan Timur. Di luar misi, bebas berkeliaran: mengemudi dan berjalan kaki, dikejar polisi darat dengan formasi mengapit dan helikopter bersorot saat bintang wanted naik, membeli upgrade mesin/NOS/cat di garasi, makan di warung, dan menyimpan progres di 3 slot save.
 
-## Cara main
+Fitur: kota prosedural deterministik (seed tetap), gedung bertekstur kaya dengan fasad bervariasi arah cahaya, refleksi jalan basah geometris dari papan neon dan lampu, kendaraan melengkung glossy dengan pelat unik (pelat dinas per unit polisi), pejalan kaki beranatomi penuh dengan pose langkah, lalu lintas hidup, 3 stasiun radio synth prosedural, efek suara WebAudio, HUD padat dengan minimap hidup, dan peta kota penuh berisi distrik, toko, dan legenda.
 
-```bash
+Kontrol: WASD jalan/kemudi · E interaksi/masuk mobil · F keluar mobil · klik kiri tembak · 1/2/3 senjata · Shift lari/NOS · Space rem · M peta · R radio · H klakson · Esc jeda & simpan.
+
+## Run it
+
+```sh
 node serve.ts
-# buka http://localhost:8080
 ```
 
-- **WASD / panah** — berjalan atau mengemudi
-- **E** — masuk / keluar mobil, interaksi toko dan misi
-- **Mouse + klik / F** — membidik dan menembak
-- **1 / 2 / 3** — ganti senjata (tinju, pistol, shotgun)
-- **Shift** — NOS saat mengemudi, lari saat jalan kaki
-- **M** — peta kota, **P / Esc** — pause, **R** — ganti stasiun radio
+Lalu buka http://localhost:8080 di Chrome desktop. Untuk membangun dossier entri: `mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts`.
 
-## Fitur
+---
 
-- Kota pesisir prosedural: 7 distrik, dermaga, pantai, mercusuar, pasar ikan,
-  jembatan pelabuhan, menara jam, dan taman kota.
-- Fasad gedung bervariasi: balkon ber-railing, kanopi, etalase toko menyala
-  dengan nama orisinal, atap datar ber-AC dan atap miring terracotta.
-- Jalan basah seperti cermin: pantulan neon, lampu jalan, lampu mobil, dan
-  sorot helikopter ter-smear di aspal bertekstur dengan genangan.
-- Polisi dengan pelat dinas berbeda tiap unit, lightbar merah-biru bergantian,
-  formasi mengapit, roadblock, dan helikopter bersorot di wanted tinggi.
-- 10 misi cerita berurutan, 4 toko (garasi, senjata, pakaian, warung makan),
-  3 stasiun radio synth prosedural, efek suara WebAudio, dan 3 slot save.
-- HUD padat: uang, HP, armor, senjata dan amunisi, bintang wanted, jam, misi
-  aktif, dispatch polisi, info radio, speedometer + NOS, dan minimap hidup.
-
-## Struktur
-
-- `main.ts` — pengemas dossier make.fun (byte-identik di dua run).
-- `game/index.html` — halaman game, HUD, layar judul, pause, dan peta.
-- `game/src/` — modul game: config, random, input, render, city, vehicles,
-  pedestrians, police, helicopter, player, combat, missions, shops, radio,
-  audio, hud, save, shots, main.
-- `game/vendor/three.min.js` — Three.js vendored (minified).
-- `shoot.mjs` + `shots.json` — pengambil 4 screenshot 1280x800.
+<sub>Entered on [make.fun](https://make.fun/?ref=d2zmzjc5&utm_source=github&utm_medium=readme&utm_campaign=gta6-01) · AI agents build software for cash rewards</sub>

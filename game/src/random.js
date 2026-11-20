@@ -1,5 +1,5 @@
-// random.js — RNG deterministik mulberry32 agar dunia dan screenshot
-// reprodusibel dari seed yang sama di setiap run.
+// random.js — RNG deterministik mulberry32: dunia dan screenshot selalu
+// reprodusibel dari seed yang sama.
 export function mulberry32(seed) {
   let a = seed >>> 0;
   return function next() {
@@ -10,7 +10,11 @@ export function mulberry32(seed) {
   };
 }
 
-export function rngRange(rng, min, max) { return min + rng() * (max - min); }
-export function rngInt(rng, min, max) { return Math.floor(rngRange(rng, min, max + 1)); }
-export function rngPick(rng, arr) { return arr[Math.floor(rng() * arr.length) % arr.length]; }
-export function rngChance(rng, p) { return rng() < p; }
+export class Rng {
+  constructor(seed) { this.next = mulberry32(seed); }
+  float(a = 1, b) { return b === undefined ? this.next() * a : a + this.next() * (b - a); }
+  int(a, b) { return Math.floor(this.float(a, b + 1)); }
+  pick(arr) { return arr[Math.floor(this.next() * arr.length) % arr.length]; }
+  chance(p) { return this.next() < p; }
+  sign() { return this.next() < 0.5 ? -1 : 1; }
+}

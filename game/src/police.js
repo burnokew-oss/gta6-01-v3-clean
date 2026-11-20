@@ -1,100 +1,118 @@
-// police.js — AI polisi Teluk Cerah: patroli mengejar dengan formasi
-// mengapit kiri-kanan pemain, roadblock di wanted tinggi, tingkat wanted
-// 0-5 bintang, dan teks dispatch radio untuk HUD.
-import { makeCar, updateLightbar } from "./vehicles.js";
-import { POLICE_PLATES } from "./config.js";
+// police.js — AI polisi: patroli mengejar dengan formasi mengapit,
+// roadblock di wanted tinggi, tingkat wanted 0–5 bintang, dispatch radio.
+import { makeCar, policePlate } from "./vehicles.js";
+
+const DISPATCH = [
+  "Unit {u} merespons ke posisi terakhir tersangka.",
+  "Semua unit: tersangka terlihat di {d}. Kejar dan hentikan.",
+  "Dispatch: kendaraan merah glossy melaju ke arah dermaga.",
+  "Unit {u}: formasi apit kiri-kanan, jangan sampai lolos.",
+  "Helikopter Teluk-1 sudah di udara, sorot tetap di tersangka.",
+  "Wanted naik. Roadblock disiapkan di jalan utama.",
+];
 
 export class Police {
   constructor(scene) {
-    this.scene = scene;
     this.units = [];
     this.wanted = 0;
     this.heat = 0;
     this.dispatchLog = [];
-    this.blockers = [];
+    this.dispatchTimer = 0;
+    for (let i = 0; i < 4; i++) {
+      const mesh = makeCar({ color: 0xf2f2f2, police: true, plate: policePlate(i + 1) });
+      mesh.position.set(60 + i * 20, 0, 160 + i * 14);
+      mesh.visible = false;
+      scene.add(mesh);
+      this.units.push({ mesh, speed: 0, slot: i, roadblock: false });
+    }
+    this.blinkT = 0;
   }
-  setWanted(level, reason) {
-    const next = Math.max(0, Math.min(5, level));
-    if (next !== this.wanted) {
-      this.wanted = next;
-      if (next > 0) this.pushDispatch("Dispatch: wanted " + next + " bintang — " + (reason || "tersangka terlihat di avenue utama"));
-      this.syncUnits();
+  addHeat(amount, district = "Pusat Cerah") {
+    this.heat = Math.min(100, this.heat + amount);
+    const stars = Math.min(5, Math.floor(this.heat / 18) + (this.heat > 4 ? 1 : 0));
+    if (stars > this.wanted) {
+      this.wanted = stars;
+      this.say(DISPATCH[Math.min(DISPATCH.length - 1, stars + 1)]
+        .replace("{u}", String(2 + stars)).replace("{d}", district));
     }
   }
-  addHeat(amount) {
-    this.heat += amount;
-    if (this.heat > 30 && this.wanted < 5) { this.setWanted(this.wanted + 1, "kejahatan berlanjut"); this.heat = 0; }
+  cool(dt) {
+    this.heat = Math.max(0, this.heat - dt * 1.1);
+    this.wanted = Math.min(5, Math.floor(this.heat / 18) + (this.heat > 4 ? 1 : 0));
   }
-  coolDown(dt) {
-    this.heat = Math.max(0, this.heat - dt * 2);
-  }
-  pushDispatch(text) {
+  say(text) {
     this.dispatchLog.unshift(text);
-    if (this.dispatchLog.length > 4) this.dispatchLog.pop();
+    if (this.dispatchLog.length > 3) this.dispatchLog.pop();
   }
-  syncUnits() {
-    const need = this.wanted === 0 ? 0 : this.wanted + 1;
-    while (this.units.length < need) {
-      const idx = this.units.length;
-      const car = makeCar({ color: 0xf1f5f9, plate: POLICE_PLATES[idx % POLICE_PLATES.length], police: true, unit: idx + 7 });
-      car.position.set(-30 - idx * 8, 0, idx % 2 ? 14 : -14);
-      this.scene.add(car);
-      this.units.push({ car, speed: 0, angle: Math.PI, flank: idx % 2 ? 1 : -1, idx });
-      this.pushDispatch("Unit " + String(idx + 7).padStart(2, "0") + " meluncur, pelat " + POLICE_PLATES[idx % POLICE_PLATES.length]);
-    }
-    while (this.units.length > need) {
-      const u = this.units.pop();
-      this.scene.remove(u.car);
-    }
-    if (this.wanted >= 4 && this.blockers.length === 0) this.makeRoadblock();
-    if (this.wanted < 4) { for (const b of this.blockers) this.scene.remove(b); this.blockers = []; }
-  }
-  makeRoadblock() {
-    for (let i = 0; i < 2; i++) {
-      const car = makeCar({ color: 0xf1f5f9, plate: POLICE_PLATES[(i + 2) % POLICE_PLATES.length], police: true, unit: i + 21 });
-      car.position.set(52, 0, i === 0 ? -3.4 : 3.4);
-      car.rotation.y = Math.PI / 2 + (i ? 0.22 : -0.22);
-      this.scene.add(car);
-      this.blockers.push(car);
-    }
-    this.pushDispatch("Roadblock didirikan di avenue timur, semua unit siaga");
-  }
-  placeFlanking(heroPos, heroAngle) {
-    // Penempatan deterministik untuk adegan chase: dua unit PENUH mengapit.
-    this.syncUnits();
-    const fx = Math.cos(heroAngle), fz = -Math.sin(heroAngle);
-    const rx = -fz, rz = fx;
-    this.units.slice(0, 2).forEach((u, i) => {
-      const side = i === 0 ? -1 : 1;
-      u.car.position.set(
-        heroPos.x - fx * 4.6 + rx * side * 5.6,
-        0,
-        heroPos.z - fz * 4.6 + rz * side * 5.6
-      );
-      u.car.rotation.y = heroAngle;
-      u.speed = 24;
+  activeCount() { return this.wanted <= 0 ? 0 : Math.min(4, this.wanted + 1); }
+  update(dt, t, targetPos, targetSpeed = 0) {
+    this.blinkT = t;
+    const n = this.activeCount();
+    this.units.forEach((u, i) => {
+      const active = i < n;
+      u.mesh.visible = active;
+      if (!active) return;
+      // slot formasi: apit kiri, apit kanan, belakang, roadblock depan
+      const back = new THREE.Vector3(0, 0, 1);
+      let goal;
+      if (this.wanted >= 4 && i === 3) {
+        const ahead = targetPos.clone(); ahead.z -= 26; ahead.x += 4;
+        goal = ahead; u.roadblock = true;
+      } else {
+        const side = i === 0 ? -4.6 : i === 1 ? 4.6 : 0;
+        goal = targetPos.clone(); goal.x += side; goal.z += i === 2 ? 8.5 : 1.5;
+        u.roadblock = false;
+      }
+      const to = goal.clone().sub(u.mesh.position); to.y = 0;
+      const dist = to.length();
+      const wantYaw = Math.atan2(to.x, to.z) - Math.PI / 2;
+      let dy = wantYaw - u.mesh.rotation.y;
+      while (dy > Math.PI) dy -= Math.PI * 2;
+      while (dy < -Math.PI) dy += Math.PI * 2;
+      u.mesh.rotation.y += THREE.MathUtils.clamp(dy, -2.4 * dt, 2.4 * dt);
+      const topSpeed = u.roadblock && dist < 3 ? 0 : 26 + this.wanted * 2.2;
+      u.speed = THREE.MathUtils.clamp(dist * 1.4, 0, topSpeed);
+      const fwd = new THREE.Vector3(1, 0, 0).applyEuler(u.mesh.rotation);
+      u.mesh.position.addScaledVector(fwd, u.speed * dt);
+      for (const w of u.mesh.userData.wheels) w.rotation.z -= u.speed * dt / 0.42;
+      // lightbar berkedip bergantian merah-biru
+      const mats = u.mesh.userData.lightbarMats;
+      if (mats) mats.forEach((m, j) => {
+        const on = Math.sin(t * 10 + (j % 2) * Math.PI) > -0.2;
+        m.color.setHex(!on ? 0x330a10 : (j % 2 ? 0x2255ff : 0xff2233));
+      });
+      void back;
     });
-  }
-  update(dt, t, target, targetSpeed) {
-    for (const u of this.units) {
-      const fx = Math.cos(target.angle || 0), fz = -Math.sin(target.angle || 0);
-      const goalX = target.x - fx * 5 + (-fz) * u.flank * 5.4;
-      const goalZ = target.z - fz * 5 + fx * u.flank * 5.4;
-      const dx = goalX - u.car.position.x, dz = goalZ - u.car.position.z;
-      const dist = Math.hypot(dx, dz) || 1;
-      const want = Math.atan2(-dz, dx);
-      let diff = want - u.angle;
-      while (diff > Math.PI) diff -= Math.PI * 2;
-      while (diff < -Math.PI) diff += Math.PI * 2;
-      u.angle += Math.max(-2.4 * dt, Math.min(2.4 * dt, diff));
-      const top = 30 + this.wanted * 3.4;
-      u.speed += ((dist > 4 ? top : targetSpeed) - u.speed) * Math.min(1, dt * 1.4);
-      u.car.position.x += Math.cos(u.angle) * u.speed * dt;
-      u.car.position.z += -Math.sin(u.angle) * u.speed * dt;
-      u.car.rotation.y = u.angle;
-      for (const w of u.car.userData.wheels) w.rotation.z -= u.speed * dt * 2.2;
-      updateLightbar(u.car, t);
+    this.dispatchTimer -= dt;
+    if (this.wanted > 0 && this.dispatchTimer <= 0) {
+      this.dispatchTimer = 9;
+      this.say(DISPATCH[Math.floor(Math.random() * 3)].replace("{u}", String(1 + Math.floor(Math.random() * 6))).replace("{d}", "Pusat Cerah"));
     }
-    for (const b of this.blockers) updateLightbar(b, t + 1);
+  }
+  setChasePose(heroPos, heroYaw) {
+    // dua patroli PENUH mengapit hero kiri-kanan, satu di belakang
+    this.wanted = 4; this.heat = 76;
+    const right = new THREE.Vector3(Math.cos(heroYaw), 0, -Math.sin(heroYaw));
+    const fwd = new THREE.Vector3(Math.sin(heroYaw), 0, Math.cos(heroYaw));
+    const carYaw = heroYaw - Math.PI / 2; // sumbu +x mobil sejajar arah hero
+    const poses = [
+      { off: right.clone().multiplyScalar(-5.2).addScaledVector(fwd, 0.6), yaw: carYaw },
+      { off: right.clone().multiplyScalar(5.2).addScaledVector(fwd, 0.2), yaw: carYaw + 0.06 },
+      { off: fwd.clone().multiplyScalar(-10.5), yaw: carYaw },
+      { off: fwd.clone().multiplyScalar(-20).addScaledVector(right, -3), yaw: carYaw },
+    ];
+    this.units.forEach((u, i) => {
+      u.mesh.visible = true;
+      u.mesh.position.copy(heroPos).add(poses[i].off);
+      u.mesh.position.y = 0;
+      u.mesh.rotation.y = poses[i].yaw;
+      const mats = u.mesh.userData.lightbarMats;
+      if (mats) mats.forEach((m, j) => m.color.setHex(j % 2 ? 0x2255ff : 0xff2233));
+    });
+    this.dispatchLog = [
+      "Unit 5: formasi apit kiri-kanan, tersangka terjepit.",
+      "Helikopter Teluk-1 di udara, sorot mengunci kendaraan merah.",
+      "Dispatch: wanted 4 bintang, semua unit ke jalan utama.",
+    ];
   }
 }

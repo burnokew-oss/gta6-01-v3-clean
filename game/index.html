@@ -3,165 +3,151 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Teluk Cerah — Open World Crime</title>
+<title>Teluk Cerah — Kota Matahari Terbit</title>
 <link rel="icon" href="data:,">
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
-  html,body { width:100%; height:100%; overflow:hidden; background:#0b1620; font-family:'Segoe UI',Arial,sans-serif; color:#fff; }
-  #game-canvas { position:fixed; inset:0; width:100%; height:100%; display:block; }
-  .panel { background:rgba(8,20,32,.78); border:1.5px solid rgba(255,255,255,.28); border-radius:10px; padding:8px 11px; backdrop-filter:blur(3px); }
-  #hud { position:fixed; inset:0; pointer-events:none; z-index:5; }
-  #hud-topleft { position:absolute; top:12px; left:12px; min-width:218px; }
-  #hud-money { font-size:24px; font-weight:800; color:#4ade80; text-shadow:0 2px 3px #000; }
-  #hud-rep { font-size:13px; font-weight:700; color:#fbbf24; }
-  .bar { height:11px; border-radius:5px; background:rgba(255,255,255,.18); margin-top:5px; overflow:hidden; }
-  .bar > div { height:100%; transition:width .25s; }
-  #hud-hpbar { background:linear-gradient(90deg,#ef4444,#f97316); }
-  #hud-armorbar { background:linear-gradient(90deg,#38bdf8,#2563eb); }
-  #hud-hptext { font-size:11.5px; font-weight:700; margin-top:4px; letter-spacing:.4px; }
-  #hud-topright { position:absolute; top:12px; right:12px; text-align:right; min-width:196px; }
-  #hud-stars { font-size:25px; letter-spacing:3px; text-shadow:0 2px 4px #000; }
-  #hud-wanted-label { font-size:12px; font-weight:800; color:#fca5a5; letter-spacing:1px; }
-  #hud-clock { font-size:14.5px; font-weight:700; margin-top:3px; }
-  #hud-district { font-size:12px; color:#7dd3fc; font-weight:700; letter-spacing:1px; }
-  #hud-missionbox { position:absolute; top:12px; left:50%; transform:translateX(-50%); width:430px; text-align:center; }
-  #hud-mission { font-size:15.5px; font-weight:800; color:#ffd23e; text-shadow:0 1px 2px #000; }
-  #hud-objective { font-size:13px; margin-top:2px; }
-  #hud-dispatch { position:absolute; top:118px; right:12px; width:252px; font-size:11.5px; line-height:1.5; color:#bfdbfe; }
-  #hud-dispatch div { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  #hud-dialog { position:absolute; bottom:118px; left:50%; transform:translateX(-50%); width:520px; font-size:14px; text-align:center; line-height:1.45; }
-  #hud-notice { position:absolute; top:96px; left:50%; transform:translateX(-50%); font-size:16px; font-weight:800; color:#4ade80; background:rgba(8,20,32,.8); padding:7px 16px; border-radius:9px; transition:opacity .4s; }
-  #hud-bottomleft { position:absolute; left:12px; bottom:12px; padding:5px; }
-  #minimap { display:block; border-radius:8px; }
-  #hud-bottomright { position:absolute; right:12px; bottom:12px; text-align:right; min-width:190px; }
-  #hud-weapon { font-size:19px; font-weight:800; color:#fde68a; }
-  #hud-speed { font-size:21px; font-weight:800; margin-top:2px; }
-  #hud-radio { font-size:12px; color:#f0abfc; margin-top:3px; }
-  .noswrap { margin-top:5px; }
-  .noswrap span { font-size:10.5px; font-weight:800; color:#7dd3fc; letter-spacing:1px; }
-  #hud-prompt { position:absolute; bottom:14px; left:50%; transform:translateX(-50%); font-size:13.5px; font-weight:700; background:rgba(8,20,32,.75); padding:6px 14px; border-radius:8px; }
-  .overlay { position:fixed; inset:0; display:none; align-items:center; justify-content:center; z-index:20; }
-  #title-screen { background:linear-gradient(180deg,rgba(10,30,55,.18) 0%,rgba(10,20,38,.55) 78%,rgba(5,10,20,.88) 100%); flex-direction:column; }
-  #title-card { display:flex; gap:26px; align-items:center; background:rgba(6,17,30,.72); border:2px solid rgba(255,210,62,.65); border-radius:18px; padding:26px 34px; max-width:860px; }
-  #title-name { font-size:64px; font-weight:900; letter-spacing:2px; line-height:.95; color:#fff; text-shadow:0 4px 0 #c2410c,0 8px 22px rgba(0,0,0,.6); }
-  #title-name em { color:#ffd23e; font-style:normal; }
-  #title-sub { font-size:16.5px; color:#bae6fd; margin-top:9px; line-height:1.5; max-width:430px; }
-  .menu { margin-top:16px; display:flex; flex-direction:column; gap:8px; }
-  .menu button, .pausebtns button { pointer-events:auto; cursor:pointer; font-size:16.5px; font-weight:800; color:#10222e; background:linear-gradient(180deg,#ffd23e,#f59e0b); border:none; border-radius:9px; padding:10px 22px; text-align:left; }
-  .menu button.ghost { background:rgba(255,255,255,.14); color:#e2e8f0; border:1.5px solid rgba(255,255,255,.4); }
-  #title-foot { margin-top:16px; font-size:13px; color:#e2e8f0; background:rgba(6,17,30,.7); padding:8px 18px; border-radius:8px; }
-  #pause-menu, #map-overlay { background:rgba(4,10,18,.72); flex-direction:column; }
-  .pausecard { background:rgba(8,20,32,.92); border:1.5px solid rgba(255,255,255,.3); border-radius:14px; padding:24px 30px; text-align:center; }
-  .pausecard h2 { font-size:30px; margin-bottom:6px; color:#ffd23e; }
-  .pausebtns { display:flex; flex-direction:column; gap:7px; margin-top:12px; }
-  .pausebtns button { text-align:center; font-size:14.5px; padding:8px 18px; }
-  #map-card { background:rgba(8,20,32,.94); border:2px solid rgba(125,211,252,.5); border-radius:16px; padding:18px 22px; text-align:center; }
-  #map-card h2 { color:#7dd3fc; font-size:26px; margin-bottom:8px; letter-spacing:1px; }
-  #map-legend { display:flex; gap:16px; justify-content:center; font-size:13px; margin-top:10px; flex-wrap:wrap; max-width:640px; }
-  #map-legend b { padding:2px 8px; border-radius:6px; color:#0b1620; }
+  html,body { width:100%; height:100%; overflow:hidden; background:#0b1620; font-family:'Segoe UI',system-ui,sans-serif; color:#fff; }
+  #game { position:fixed; inset:0; width:100%; height:100%; display:block; }
+  .panel { background:rgba(8,14,20,.78); border:1px solid rgba(255,255,255,.22); border-radius:10px; backdrop-filter:blur(3px); }
+  /* ---------- HUD kiri atas: misi + dispatch ---------- */
+  #hud-left { position:fixed; top:14px; left:14px; width:308px; padding:10px 12px; z-index:5; }
+  #hud-mission { font-weight:700; color:#ffd94d; font-size:15px; text-shadow:0 1px 3px #000; }
+  #hud-objective { font-size:13px; margin-top:3px; line-height:1.35; }
+  #hud-dispatch { margin-top:8px; font-size:11px; color:#9fd8ef; line-height:1.5; min-height:16px; }
+  /* ---------- HUD kanan atas: status ---------- */
+  #hud-right { position:fixed; top:14px; right:14px; width:228px; padding:10px 12px; z-index:5; text-align:right; }
+  #hud-money { font-size:24px; font-weight:800; color:#7ee08a; text-shadow:0 2px 4px #000; }
+  #hud-rep { font-size:11px; color:#ffd94d; letter-spacing:1px; }
+  #hud-clock { font-size:12px; color:#cfe8f5; margin-top:2px; }
+  #hud-stars { font-size:21px; letter-spacing:2px; margin-top:2px; text-shadow:0 0 8px rgba(255,217,77,.6); }
+  .bar-wrap { height:11px; background:#10161c; border:1px solid rgba(255,255,255,.35); border-radius:5px; margin-top:6px; overflow:hidden; }
+  .bar-fill { height:100%; width:100%; transition:width .25s; }
+  #bar-hp { background:linear-gradient(90deg,#37d353,#7ee08a); }
+  #bar-armor { background:linear-gradient(90deg,#3f7fbf,#6ab0ff); width:0%; }
+  .bar-label { font-size:10px; text-align:left; color:#cfe8f5; letter-spacing:1px; margin-top:5px; }
+  #hud-weapon { margin-top:7px; font-size:14px; font-weight:700; }
+  #hud-ammo { font-size:12px; color:#ffd94d; }
+  #hud-radio { margin-top:6px; font-size:11px; color:#f7b733; }
+  /* ---------- minimap ---------- */
+  #minimap-wrap { position:fixed; left:14px; bottom:14px; z-index:5; border-radius:10px; overflow:hidden; border:1px solid rgba(255,255,255,.35); }
+  #minimap { display:block; width:190px; height:190px; }
+  /* ---------- kecepatan ---------- */
+  #hud-speed { position:fixed; right:18px; bottom:16px; z-index:5; text-align:center; padding:8px 16px; opacity:0; transition:opacity .3s; }
+  #hud-speed b { font-size:34px; color:#fff; }
+  #hud-speed span { font-size:11px; color:#9fd8ef; display:block; letter-spacing:2px; }
+  #nos-wrap { height:7px; background:#10161c; border-radius:4px; margin-top:5px; overflow:hidden; }
+  #bar-nos { height:100%; width:0%; background:linear-gradient(90deg,#00e5ff,#7cff4f); }
+  /* ---------- dialog / notifikasi / prompt ---------- */
+  #dialog-box { position:fixed; left:50%; bottom:118px; transform:translateX(-50%); width:560px; max-width:92vw; padding:12px 16px; z-index:6; opacity:0; transition:opacity .4s; }
+  #dialog-who { color:#ffd94d; font-weight:700; font-size:14px; }
+  #dialog-text { font-size:14px; margin-top:2px; line-height:1.4; }
+  #notify-box { position:fixed; left:50%; top:84px; transform:translateX(-50%); z-index:6; padding:9px 22px; border-radius:24px; background:rgba(20,40,24,.88); border:1px solid #7ee08a; color:#d8ffd8; font-weight:600; font-size:15px; opacity:0; transition:opacity .4s; }
+  #hud-prompt { position:fixed; left:50%; bottom:26px; transform:translateX(-50%); z-index:5; padding:7px 18px; border-radius:20px; background:rgba(8,14,20,.8); border:1px solid rgba(255,255,255,.3); font-size:13px; opacity:0; transition:opacity .3s; }
+  #crosshair { position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); z-index:4; color:rgba(255,255,255,.85); font-size:20px; text-shadow:0 0 4px #000; pointer-events:none; }
+  /* ---------- layar judul ---------- */
+  #title-screen { position:fixed; inset:0; z-index:20; display:flex; align-items:center; background:linear-gradient(90deg, rgba(10,8,18,.88) 0%, rgba(10,8,18,.55) 44%, rgba(10,8,18,0) 70%); }
+  #title-inner { margin-left:6vw; max-width:520px; }
+  #title-logo { font-size:74px; font-weight:900; line-height:.95; letter-spacing:1px;
+    background:linear-gradient(180deg,#ffe93d 15%,#ff8c42 55%,#ff3860 100%); -webkit-background-clip:text; background-clip:text; color:transparent;
+    filter:drop-shadow(0 4px 0 rgba(60,10,40,.55)) drop-shadow(0 10px 22px rgba(0,0,0,.5)); }
+  #title-sub { margin-top:8px; font-size:17px; color:#ffe9c9; text-shadow:0 2px 6px #000; letter-spacing:3px; }
+  #title-story { margin-top:14px; font-size:14px; line-height:1.55; color:#e8f2f8; text-shadow:0 1px 4px #000; max-width:430px; }
+  #title-menu { margin-top:22px; display:flex; flex-direction:column; gap:9px; width:300px; }
+  .tbtn { padding:12px 18px; font-size:16px; font-weight:700; color:#fff; text-align:left; cursor:pointer;
+    background:linear-gradient(90deg, rgba(255,56,96,.85), rgba(255,140,66,.75)); border:1px solid rgba(255,255,255,.4); border-radius:8px; }
+  .tbtn:hover { filter:brightness(1.2); }
+  .tbtn.ghost { background:rgba(8,14,20,.7); }
+  #portrait { border-radius:50%; border:3px solid #ffd94d; box-shadow:0 6px 24px rgba(0,0,0,.6); position:absolute; right:6vw; bottom:7vh; width:170px; height:170px; background:#f7b733; }
+  #title-controls { position:absolute; left:6vw; bottom:5vh; font-size:12px; color:#cfe8f5; text-shadow:0 1px 3px #000; line-height:1.7; }
+  /* ---------- pause / peta / toko ---------- */
+  .overlay { position:fixed; inset:0; z-index:30; display:none; align-items:center; justify-content:center; background:rgba(5,10,16,.72); }
+  .overlay.open { display:flex; }
+  .card { padding:26px 30px; width:520px; max-width:94vw; max-height:92vh; overflow:auto; }
+  .card h2 { color:#ffd94d; margin-bottom:12px; font-size:24px; }
+  .card p { font-size:14px; line-height:1.6; color:#e8f2f8; }
+  .mbtn { display:block; width:100%; margin-top:9px; padding:11px 14px; font-size:15px; font-weight:600; color:#fff; text-align:left;
+    background:rgba(38,64,84,.9); border:1px solid rgba(255,255,255,.3); border-radius:8px; cursor:pointer; }
+  .mbtn:hover { background:rgba(58,94,120,.95); }
+  .mbtn small { display:block; font-weight:400; color:#9fd8ef; font-size:12px; margin-top:2px; }
+  #map-overlay { background:rgba(5,10,16,.9); }
+  #map-canvas { width:min(1160px,96vw); height:auto; border:1px solid rgba(255,255,255,.3); border-radius:10px; }
 </style>
 </head>
 <body>
-<canvas id="game-canvas"></canvas>
+<canvas id="game"></canvas>
+<div id="crosshair">+</div>
 
-<div id="hud">
-  <div id="hud-topleft" class="panel">
-    <div id="hud-money">Rp 850</div>
-    <div id="hud-rep">REP 12</div>
-    <div class="bar"><div id="hud-hpbar" style="width:100%"></div></div>
-    <div class="bar"><div id="hud-armorbar" style="width:50%"></div></div>
-    <div id="hud-hptext">HP 100 • ARMOR 50</div>
-  </div>
-  <div id="hud-topright" class="panel">
-    <div id="hud-stars">☆☆☆☆☆</div>
-    <div id="hud-wanted-label">AMAN</div>
-    <div id="hud-clock">Hari 3 • 17:24</div>
-    <div id="hud-district">TAMAN CERAH</div>
-  </div>
-  <div id="hud-missionbox" class="panel">
-    <div id="hud-mission">MISI 1/10: Pulang ke Teluk Cerah</div>
-    <div id="hud-objective">▸ Ambil mobil merahmu di dermaga</div>
-  </div>
-  <div id="hud-dispatch" class="panel"></div>
-  <div id="hud-notice" style="opacity:0"></div>
-  <div id="hud-dialog" class="panel"></div>
-  <div id="hud-bottomleft" class="panel"><canvas id="minimap" width="176" height="176"></canvas></div>
-  <div id="hud-bottomright" class="panel">
-    <div id="hud-weapon">PISTOL 48</div>
-    <div id="hud-speed">0 km/h</div>
-    <div class="noswrap"><span>NOS</span><div class="bar"><div id="hud-nosbar" style="width:100%;background:linear-gradient(90deg,#38bdf8,#818cf8)"></div></div></div>
-    <div id="hud-radio">♪ Radio Ombak 91.2 — Senja di Dermaga</div>
-  </div>
-  <div id="hud-prompt">[E] Keluar mobil • [M] Peta • [R] Radio</div>
+<div id="hud-left" class="panel">
+  <div id="hud-mission">Misi 1/10: Pulang ke Teluk</div>
+  <div id="hud-objective">▸ Temui pemberi misi</div>
+  <div id="hud-dispatch"></div>
 </div>
 
-<div id="title-screen" class="overlay">
-  <div id="title-card">
-    <svg width="218" height="272" viewBox="0 0 218 272" aria-label="Potret Raka">
-      <rect x="0" y="0" width="218" height="272" rx="14" fill="#f6a95c"/>
-      <rect x="0" y="150" width="218" height="122" fill="#2dd4bf"/>
-      <path d="M0 158 Q60 138 110 152 T218 148 V272 H0 Z" fill="#1e9bb8"/>
-      <path d="M14 272 V120 Q20 84 44 96 Q34 122 40 150 L30 272 Z" fill="#2e9e4f"/>
-      <path d="M204 272 V110 Q198 76 174 90 Q186 118 180 148 L192 272 Z" fill="#2e9e4f"/>
-      <circle cx="168" cy="36" r="19" fill="#ffe9a0"/>
-      <path d="M52 272 Q56 196 84 182 H136 Q164 196 168 272 Z" fill="#d92323"/>
-      <path d="M84 182 L110 214 L136 182 L128 176 L110 196 L92 176 Z" fill="#f8fafc"/>
-      <rect x="88" y="118" width="44" height="52" rx="14" fill="#c98a5a"/>
-      <ellipse cx="110" cy="92" rx="41" ry="46" fill="#e0aa72"/>
-      <path d="M68 84 Q72 40 110 38 Q148 40 152 84 Q138 62 110 62 Q82 62 68 84 Z" fill="#1c1917"/>
-      <rect x="72" y="86" width="76" height="15" rx="7" fill="#111827"/>
-      <rect x="78" y="89" width="28" height="9" rx="4" fill="#7dd3fc"/>
-      <rect x="114" y="89" width="28" height="9" rx="4" fill="#7dd3fc"/>
-      <path d="M94 122 Q110 132 126 122" stroke="#8a5a34" stroke-width="4" fill="none" stroke-linecap="round"/>
-      <path d="M96 152 Q110 158 124 152" stroke="#8a5a34" stroke-width="3" fill="none" stroke-linecap="round"/>
-    </svg>
-    <div>
-      <div id="title-name">TELUK<br><em>CERAH</em></div>
-      <div id="title-sub">Raka pulang ke kota pesisir yang tak pernah tidur. Sepuluh misi, satu mobil merah, dan seluruh polisi kota mengejarmu. Open-world crime orisinal — jelajahi, kejar, tembak, kabur.</div>
-      <div class="menu">
-        <button id="btn-start">▶ &nbsp;MULAI BERMAIN</button>
-        <button class="ghost">Lanjutkan — Misi 1: Pulang ke Teluk Cerah</button>
-        <button class="ghost">Cara Main: WASD • E interaksi • M peta • 1/2/3 senjata</button>
-      </div>
+<div id="hud-right" class="panel">
+  <div id="hud-money">$250</div>
+  <div id="hud-rep">REP 0</div>
+  <div id="hud-clock">Hari 1 · 17:20</div>
+  <div id="hud-wanted"><span id="hud-stars">☆☆☆☆☆</span></div>
+  <div class="bar-label">HP</div>
+  <div class="bar-wrap"><div id="bar-hp" class="bar-fill"></div></div>
+  <div class="bar-label">ARMOR</div>
+  <div class="bar-wrap"><div id="bar-armor" class="bar-fill"></div></div>
+  <div id="hud-weapon">Pistol P9</div>
+  <div id="hud-ammo">60</div>
+  <div id="hud-radio">♪ Gelombang 98.2</div>
+</div>
+
+<div id="minimap-wrap"><canvas id="minimap" width="190" height="190"></canvas></div>
+
+<div id="hud-speed" class="panel"><b>0</b><span>KM/JAM · NOS</span><div id="nos-wrap"><div id="bar-nos"></div></div></div>
+<div id="dialog-box" class="panel"><div id="dialog-who"></div><div id="dialog-text"></div></div>
+<div id="notify-box"></div>
+<div id="hud-prompt"></div>
+
+<div id="title-screen">
+  <div id="title-inner">
+    <div id="title-logo">TELUK<br>CERAH</div>
+    <div id="title-sub">KOTA MATAHARI TERBIT</div>
+    <p id="title-story">Raka pulang ke kota pesisir Teluk Cerah setelah lima tahun merantau. Di antara pasar ikan, dermaga, dan jalanan neon yang basah, ia harus menuntaskan 10 misi: mencuri mobil, merampok toko, berkejaran dengan polisi, dan satu pertempuran terakhir di pelabuhan.</p>
+    <div id="title-menu">
+      <button class="tbtn" id="btn-play">▶ &nbsp;MAIN — Pulang ke Teluk</button>
+      <button class="tbtn ghost" id="btn-how">? &nbsp;Cara Main</button>
+      <button class="tbtn ghost" id="btn-load">▤ &nbsp;Muat Simpanan</button>
     </div>
   </div>
-  <div id="title-foot">Kota: 7 distrik • 10 misi cerita • Wanted 5 bintang + helikopter • 3 slot save • Radio prosedural</div>
+  <canvas id="portrait" width="340" height="340"></canvas>
+  <div id="title-controls">WASD jalan/kemudi · E interaksi · F keluar mobil · Klik tembak · 1/2/3 senjata · M peta · R radio · H klakson · Esc jeda</div>
 </div>
 
-<div id="pause-menu" class="overlay">
-  <div class="pausecard">
-    <h2>JEDA</h2>
-    <div>Teluk Cerah menunggu, Raka.</div>
-    <div class="pausebtns">
-      <button id="btn-resume">Lanjutkan</button>
-      <button id="btn-save-0">Simpan — Slot 1</button>
-      <button id="btn-save-1">Simpan — Slot 2</button>
-      <button id="btn-save-2">Simpan — Slot 3</button>
-      <button id="btn-load-0">Muat — Slot 1</button>
-      <button id="btn-load-1">Muat — Slot 2</button>
-      <button id="btn-load-2">Muat — Slot 3</button>
-    </div>
-  </div>
-</div>
+<div id="pause-menu" class="overlay"><div class="card panel">
+  <h2>Jeda — Teluk Cerah</h2>
+  <p id="pause-stats"></p>
+  <button class="mbtn" id="btn-resume">Lanjutkan</button>
+  <button class="mbtn" id="btn-save0">Simpan ke Slot 1<small id="save-info-0"></small></button>
+  <button class="mbtn" id="btn-save1">Simpan ke Slot 2<small id="save-info-1"></small></button>
+  <button class="mbtn" id="btn-save2">Simpan ke Slot 3<small id="save-info-2"></small></button>
+  <button class="mbtn" id="btn-load0">Muat Slot 1</button>
+  <button class="mbtn" id="btn-load1">Muat Slot 2</button>
+  <button class="mbtn" id="btn-load2">Muat Slot 3</button>
+  <button class="mbtn" id="btn-quit-title">Ke Layar Judul</button>
+</div></div>
 
-<div id="map-overlay" class="overlay">
-  <div id="map-card">
-    <h2>PETA KOTA TELUK CERAH</h2>
-    <canvas id="bigmap" width="660" height="520"></canvas>
-    <div id="map-legend">
-      <span><b style="background:#ffffff">▲</b> Kamu (Raka)</span>
-      <span><b style="background:#ffd23e">★</b> Tujuan Misi</span>
-      <span><b style="background:#2563eb">●</b> Polisi</span>
-      <span><b style="background:#f97316">■</b> Garasi Pelita</span>
-      <span><b style="background:#ef4444">■</b> Toko Senjata Arus</span>
-      <span><b style="background:#a855f7">■</b> Butik Melati</span>
-      <span><b style="background:#22c55e">■</b> Warung Senja</span>
-      <span>7 distrik • pantai di selatan • mercusuar di timur</span>
-    </div>
-  </div>
-</div>
+<div id="shop-menu" class="overlay"><div class="card panel">
+  <h2 id="shop-title">Toko</h2>
+  <div id="shop-items"></div>
+  <button class="mbtn" id="btn-shop-close">Tutup (Esc)</button>
+</div></div>
 
-<script src="./vendor/three.min.js"></script>
-<script type="module" src="./src/main.js"></script>
+<div id="how-menu" class="overlay"><div class="card panel">
+  <h2>Cara Main</h2>
+  <p>Jalan kaki: WASD + mouse, Shift lari. Dekati mobil lalu tekan E untuk masuk, F untuk keluar, Space rem tangan, Shift NOS (setelah upgrade). Klik kiri menembak, 1/2/3 ganti senjata. Ikuti penanda kuning untuk misi, belanja di garasi/toko/warung lewat tombol E. Naikkan reputasi lewat 10 misi cerita, hindari bintang wanted atau kabur sampai padam. M membuka peta kota, Esc membuka jeda dan simpanan 3 slot.</p>
+  <button class="mbtn" id="btn-how-close">Kembali</button>
+</div></div>
+
+<div id="map-overlay" class="overlay"><canvas id="map-canvas" width="1160" height="760"></canvas></div>
+
+<script src="vendor/three.min.js"></script>
+<script type="module" src="src/main.js"></script>
 </body>
 </html>

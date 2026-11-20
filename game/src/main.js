@@ -1,212 +1,268 @@
-// main.js — bootstrap Teluk Cerah: merangkai semua modul, loop game
-// dengan delta waktu yang di-clamp (tidak pernah negatif, maksimal
-// 0.05 detik), resize, pause, peta, save, dan mode adegan screenshot.
-import { createRenderer, createScene, updateSkyLife } from "./render.js";
-import { buildCity, updateCityLife } from "./city.js";
-import { makeCar, randomTrafficPlate, updateLightbar } from "./vehicles.js";
-import { spawnCrowd, updateCrowd } from "./pedestrians.js";
-import { Player } from "./player.js";
+// main.js — bootstrap Teluk Cerah: merangkai semua modul, loop game dengan
+// delta waktu ter-clamp (tidak pernah negatif, maksimal 0.05 detik),
+// resize, pause, mode adegan screenshot.
+import { WORLD, VEHICLES } from "./config.js";
+import { Render } from "./render.js";
+import { City } from "./city.js";
+import { Input } from "./input.js";
+import { makeCar, Traffic } from "./vehicles.js";
+import { Pedestrians } from "./pedestrians.js";
 import { Police } from "./police.js";
-import { makeHelicopter, updateHelicopter } from "./helicopter.js";
+import { Helicopter } from "./helicopter.js";
+import { Player } from "./player.js";
 import { Combat } from "./combat.js";
 import { Missions } from "./missions.js";
 import { Shops } from "./shops.js";
 import { Radio } from "./radio.js";
-import { AudioEngine } from "./audio.js";
+import { AudioFx } from "./audio.js";
 import { Hud } from "./hud.js";
-import { Input } from "./input.js";
-import { saveToSlot, loadFromSlot, slotSummary } from "./save.js";
-import { readShotMode, setupShot } from "./shots.js";
-import { WORLD } from "./config.js";
-import { mulberry32 } from "./random.js";
+import { saveGame, loadGame, slotSummary, collectState, applyState } from "./save.js";
+import { shotName, setupShot } from "./shots.js";
 
-const canvas = document.getElementById("game-canvas");
-const renderer = createRenderer(canvas);
-const skyParts = createScene();
-const scene = skyParts.scene;
-const camera = new window.THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.1, 900);
-camera.position.set(-12, 3, 10);
-
-const city = buildCity();
-scene.add(city.group);
-
+const canvas = document.getElementById("game");
+const render = new Render(canvas);
+const scene = render.scene;
+const camera = render.camera;
+const city = new City(scene, WORLD.seed);
+const input = new Input(canvas);
+const audio = new AudioFx();
 const player = new Player(scene);
+const traffic = new Traffic(scene, city, 10);
+const pedestrians = new Pedestrians(scene, WORLD.seed, 26);
 const police = new Police(scene);
-const combat = new Combat(scene);
-const missions = new Missions(scene, player, police);
-const shops = new Shops(player, combat);
-const audio = new AudioEngine();
+const helicopter = new Helicopter(scene);
+const combat = new Combat(scene, audio);
+const missions = new Missions(scene);
+const shops = new Shops();
 const radio = new Radio(audio);
 const hud = new Hud();
-const input = new Input();
-const heli = makeHelicopter();
-heli.position.set(20, 18, 20);
-scene.add(heli);
-const crowd = spawnCrowd(scene, 26);
 
-// Lalu lintas bergerak di jalan lain kota.
-const traffic = [];
-{
-  const rng = mulberry32(4242);
-  const colors = [0x3b82f6, 0xf59e0b, 0x10b981, 0xe2e8f0, 0x8b5cf6, 0xec4899];
-  for (let i = 0; i < 8; i++) {
-    const car = makeCar({ color: colors[i % colors.length], plate: randomTrafficPlate(), pickup: i % 3 === 0 });
-    const laneZ = [-34, 34, -68, 68][i % 4];
-    car.position.set(-100 + i * 26, 0, laneZ + (i % 2 ? 2.8 : -2.8));
-    car.rotation.y = i % 2 ? Math.PI : 0;
-    scene.add(car);
-    traffic.push(car);
+function driveable(mesh, specIdx, yaw = 0) {
+  return {
+    mesh, spec: VEHICLES[specIdx],
+    state: { yaw, speed: 0 },
+    get upgrades() { return { nos: shops.owned.has("nos") }; },
+  };
+}
+const heroCar = driveable(makeCar({ color: 0xd21f2e, hero: true, plate: "TC 777 RA" }), 1, Math.PI);
+heroCar.mesh.position.set(4.5, 0, 30);
+scene.add(heroCar.mesh);
+const parkedCars = [heroCar];
+const extraSpecs = [[2, -30, 80], [0, 40, -70], [4, -90, 30], [3, 90, -100]];
+for (const [spec, x, z] of extraSpecs) {
+  const c = driveable(makeCar({ color: VEHICLES[spec].color }), spec, 0.4);
+  c.mesh.position.set(x, 0, z);
+  c.mesh.rotation.y = -Math.PI / 2 + 0.4;
+  scene.add(c.mesh);
+  parkedCars.push(c);
+}
+
+const game = {
+  render, city, player, traffic, pedestrians, police, helicopter, combat,
+  missions, shops, radio, hud, heroCar, camera,
+  clockMin: 17 * 60 + 20, day: 1,
+  state: "title", shotFixed: false,
+};
+combat.onCrime = (n) => police.addHeat(n);
+combat.onKill = () => { player.money += 40; audio.coin(); hud.notify("Musuh tumbang +$40"); };
+
+// potret karakter Raka di layar judul (ilustrasi canvas orisinal)
+(function portrait() {
+  const c = document.getElementById("portrait");
+  if (!c) return;
+  const g = c.getContext("2d");
+  const grad = g.createLinearGradient(0, 0, 0, 340);
+  grad.addColorStop(0, "#ff8c42"); grad.addColorStop(0.6, "#ff3860"); grad.addColorStop(1, "#5b2a86");
+  g.fillStyle = grad; g.fillRect(0, 0, 340, 340);
+  g.fillStyle = "#ffe93d"; g.beginPath(); g.arc(272, 66, 30, 0, 7); g.fill();
+  g.fillStyle = "#123a5c"; g.fillRect(0, 268, 340, 72);
+  g.fillStyle = "#1b5a8a";
+  for (let i = 0; i < 4; i++) { g.beginPath(); g.ellipse(40 + i * 90, 292 + (i % 2) * 18, 52, 10, 0, 0, 7); g.fill(); }
+  g.fillStyle = "#d21f2e"; g.fillRect(96, 238, 148, 102); // baju merah
+  g.fillStyle = "#b8151f"; g.fillRect(96, 238, 148, 20);
+  g.fillStyle = "#c98d5e"; g.fillRect(152, 208, 36, 40); // leher
+  g.beginPath(); g.arc(170, 158, 62, 0, 7); g.fill(); // wajah
+  g.fillStyle = "#14100c"; g.beginPath(); g.arc(170, 140, 64, Math.PI, Math.PI * 2); g.fill(); // rambut
+  g.fillRect(104, 128, 132, 16);
+  g.fillStyle = "#14161a"; g.fillRect(104, 108, 132, 24); // topi
+  g.fillRect(88, 128, 164, 10);
+  g.fillStyle = "#1c1c20";
+  g.beginPath(); g.arc(146, 160, 6, 0, 7); g.arc(194, 160, 6, 0, 7); g.fill();
+  g.strokeStyle = "#8a5a34"; g.lineWidth = 5;
+  g.beginPath(); g.arc(170, 178, 22, 0.3, Math.PI - 0.3); g.stroke();
+})();
+
+const $ = (id) => document.getElementById(id);
+const titleScreen = $("title-screen"), pauseMenu = $("pause-menu"),
+  shopMenu = $("shop-menu"), howMenu = $("how-menu"), mapOverlay = $("map-overlay");
+
+const hudChrome = ["hud-left", "hud-right", "minimap-wrap", "hud-speed", "crosshair", "hud-prompt"];
+function setState(s) {
+  game.state = s;
+  for (const id of hudChrome) { const n = $(id); if (n) n.style.display = (s === "title" || s === "map") ? "none" : ""; }
+  titleScreen.style.display = s === "title" ? "flex" : "none";
+  pauseMenu.classList.toggle("open", s === "pause");
+  mapOverlay.classList.toggle("open", s === "map");
+  if (s === "map") hud.drawFullMap(game);
+  if (s === "pause") {
+    $("pause-stats").textContent = `Uang $${player.money} · Reputasi ${player.rep} · Misi selesai ${missions.done}/10 · Hari ${game.day}`;
+    for (let i = 0; i < 3; i++) $("save-info-" + i).textContent = slotSummary(i);
+  }
+}
+function startPlay() {
+  audio.ensure();
+  radio.playing = true;
+  setState("play");
+  if (!missions.active && missions.current) {
+    const started = missions.start();
+    if (started) hud.dialog(started.dialog[0], started.dialog[1]);
+  }
+}
+$("btn-play").addEventListener("click", startPlay);
+$("btn-how").addEventListener("click", () => howMenu.classList.add("open"));
+$("btn-how-close").addEventListener("click", () => howMenu.classList.remove("open"));
+$("btn-load").addEventListener("click", () => { const d = loadGame(0); if (d) { applyState(game, d); startPlay(); } else hud.notify("Slot 1 kosong"); });
+$("btn-resume").addEventListener("click", () => setState("play"));
+$("btn-quit-title").addEventListener("click", () => setState("title"));
+$("btn-shop-close").addEventListener("click", () => { shopMenu.classList.remove("open"); setState("play"); });
+for (let i = 0; i < 3; i++) {
+  $("btn-save" + i).addEventListener("click", () => { saveGame(i, collectState(game)); hud.notify("Tersimpan di slot " + (i + 1)); setState("pause"); });
+  $("btn-load" + i).addEventListener("click", () => { const d = loadGame(i); if (d) { applyState(game, d); setState("play"); } });
+}
+
+function openShop(shop) {
+  const items = shops.menuFor(shop, player, combat);
+  $("shop-title").textContent = shop.name + ` — $${player.money}`;
+  const box = $("shop-items");
+  box.innerHTML = "";
+  if (!items.length) box.innerHTML = "<p>Semua upgrade sudah terpasang.</p>";
+  for (const item of items) {
+    const b = document.createElement("button");
+    b.className = "mbtn";
+    b.innerHTML = `${item.label}<small>${item.desc}</small>`;
+    b.addEventListener("click", () => { hud.notify(item.buy()); $("shop-title").textContent = shop.name + ` — $${player.money}`; });
+    box.appendChild(b);
+  }
+  shopMenu.classList.add("open");
+  setState("shop");
+}
+
+function nearestCar() {
+  let best = null, bd = 5;
+  for (const c of parkedCars) {
+    const d = c.mesh.position.distanceTo(player.pos);
+    if (d < bd) { bd = d; best = c; }
+  }
+  return best;
+}
+
+function interact() {
+  if (player.driving) return;
+  const shop = shops.near;
+  if (shop) { openShop(shop); return; }
+  if (!missions.active && missions.current) {
+    const spot = missions.targetPos();
+    if (Math.hypot(player.pos.x - spot.x, player.pos.z - spot.z) < 6) {
+      const started = missions.start();
+      if (started) hud.dialog(started.dialog[0], started.dialog[1]);
+      return;
+    }
+  }
+  const car = nearestCar();
+  if (car) {
+    player.enterCar(car);
+    police.addHeat(2);
+    hud.notify("Mengemudi: " + car.spec.name);
   }
 }
 
-const state = { player, police, combat, missions, shops, radio, heli, traffic, camera, city, input, renderer, scene };
-window.__teluk = state;
-
-let paused = false;
-let mapOpen = false;
-let hour = WORLD.startHour;
-let elapsed = 0;
-const shot = readShotMode();
-let frozenT = -1;
+// adegan screenshot atau mulai normal
+const shot = shotName();
 if (shot) {
-  frozenT = setupShot(shot, state);
-  if (shot === "map") drawBigMap();
-  if (shot === "chase") {
-    // Pejalan kaki di trotoar depan etalase untuk adegan chase.
-    crowd.forEach((p, i) => {
-      if (i < 7) { p.position.set(-4 + i * 5.5, 0, i % 2 ? -8.4 : 8.4); p.rotation.y = Math.PI / 2; }
-    });
-  }
-}
-
-const titleEl = document.getElementById("title-screen");
-const pauseEl = document.getElementById("pause-menu");
-const mapEl = document.getElementById("map-overlay");
-document.getElementById("btn-start").addEventListener("click", () => {
-  titleEl.style.display = "none";
-  document.getElementById("hud").style.display = "block";
-  audio.ensure(); radio.start();
-});
-document.getElementById("btn-resume").addEventListener("click", () => { paused = false; pauseEl.style.display = "none"; });
-for (let s = 0; s < 3; s++) {
-  document.getElementById("btn-save-" + s).addEventListener("click", () => { saveToSlot(s, state); hud.setNotice(slotSummary(s) + " — tersimpan"); });
-  document.getElementById("btn-load-" + s).addEventListener("click", () => { hud.setNotice(loadFromSlot(s, state) ? slotSummary(s) + " — dimuat" : "Slot kosong"); });
-}
-if (!shot) { titleEl.style.display = "flex"; document.getElementById("hud").style.display = "none"; }
-
-function drawBigMap() {
-  const mc = document.getElementById("bigmap");
-  if (!mc) return;
-  const g = mc.getContext("2d");
-  const W = mc.width, H = mc.height, C = W / 2, scale = W / 300;
-  g.fillStyle = "#69b96a"; g.fillRect(0, 0, W, H);
-  g.fillStyle = "#1e9bb8"; g.fillRect(0, H * 0.86, W, H * 0.14);
-  g.fillStyle = "#f2ddae"; g.fillRect(0, H * 0.8, W, H * 0.06);
-  g.strokeStyle = "#2c2f36"; g.lineWidth = 13;
-  for (let i = -3; i <= 3; i++) {
-    g.beginPath(); g.moveTo(0, H / 2 + i * 34 * scale); g.lineTo(W, H / 2 + i * 34 * scale); g.stroke();
-    g.beginPath(); g.moveTo(C + i * 34 * scale, 0); g.lineTo(C + i * 34 * scale, H); g.stroke();
-  }
-  g.strokeStyle = "#ffd23e"; g.lineWidth = 2.4;
-  g.beginPath(); g.moveTo(0, H / 2); g.lineTo(W, H / 2); g.stroke();
-  g.fillStyle = "#ffffff"; g.font = "bold 17px sans-serif"; g.textAlign = "center";
-  for (const d of state.city.districts) {
-    g.fillStyle = d.color;
-    g.beginPath(); g.arc(C + d.x * scale, H / 2 + d.z * scale, 9, 0, 7); g.fill();
-    g.fillStyle = "#10222e";
-    g.fillText(d.name, C + d.x * scale, H / 2 + d.z * scale - 14);
-  }
-  for (const s of shops.list) {
-    g.fillStyle = s.color; g.fillRect(C + s.x * scale - 6, H / 2 + s.z * scale - 6, 12, 12);
-    g.fillStyle = "#10222e"; g.font = "bold 12px sans-serif";
-    g.fillText(s.name, C + s.x * scale, H / 2 + s.z * scale + 22);
-  }
-  const tgt = missions.target();
-  g.fillStyle = "#ffd23e"; g.font = "bold 30px sans-serif";
-  g.fillText("★", C + tgt.x * scale, H / 2 + tgt.z * scale + 10);
-  g.fillStyle = "#ffffff"; g.font = "bold 15px sans-serif";
-  g.beginPath(); g.arc(C + player.x * scale, H / 2 + player.z * scale, 7, 0, 7); g.fill();
-  g.strokeStyle = "#111827"; g.lineWidth = 2; g.stroke();
-  for (const u of police.units) {
-    g.fillStyle = "#2563eb";
-    g.beginPath(); g.arc(C + u.car.position.x * scale, H / 2 + u.car.position.z * scale, 6, 0, 7); g.fill();
-  }
+  game.shotFixed = true;
+  const s = setupShot(game, shot);
+  setState(s === "map" ? "map" : s === "title" ? "title" : "play");
+  if (shot === "chase" || shot === "shootout") { titleScreen.style.display = "none"; game.state = "play"; }
+} else {
+  setState("title");
 }
 
 let last = performance.now();
-let sirenT = 0;
-function frame(now) {
-  requestAnimationFrame(frame);
+let elapsed = 0;
+function loop(now) {
+  requestAnimationFrame(loop);
   let dt = (now - last) / 1000;
   last = now;
-  dt = Math.max(0, Math.min(0.05, dt));
-  if (paused) { renderer.render(scene, camera); return; }
-  const t = frozenT >= 0 ? frozenT : (elapsed += dt);
-  if (frozenT < 0) {
-    // Dunia hidup hanya saat bukan adegan beku.
-    player.update(dt, input, t);
-    hour += dt * (24 / WORLD.dayLength) * 0.14;
-    if (hour >= 24) hour -= 24;
-    traffic.forEach((car, i) => {
-      const dir = i % 2 ? -1 : 1;
-      car.position.x += dir * (7 + (i % 3) * 2) * dt;
-      if (car.position.x > 128) car.position.x = -128;
-      if (car.position.x < -128) car.position.x = 128;
-      for (const w of car.userData.wheels) w.rotation.z -= dir * 8 * dt;
-    });
-    updateCrowd(crowd, dt, t);
-    police.update(dt, t, { x: player.x, z: player.z, angle: player.angle }, Math.abs(player.speed));
-    police.coolDown(dt);
-    if (police.wanted >= 3) updateHelicopter(heli, { x: player.x, z: player.z }, t, dt);
-    else { heli.position.y += (30 - heli.position.y) * dt; heli.userData.rotor.rotation.y = t * 14; }
-    missions.update(dt, combat);
-    combat.update(dt, t);
-    if (input.tapped("KeyE")) {
-      audio.ensure();
-      if (!shops.interact()) player.enterExit();
-      if (shops.notice) { hud.setNotice(shops.notice); shops.notice = ""; }
-    }
-    if (input.tapped("Digit1")) combat.switchWeapon(0);
-    if (input.tapped("Digit2")) combat.switchWeapon(1);
-    if (input.tapped("Digit3")) combat.switchWeapon(2);
-    if (input.tapped("KeyR")) { radio.next(); hud.setNotice("Radio: " + radio.station.name); }
-    if (input.tapped("KeyH")) audio.horn();
-    if (input.firing && player.mode === "foot") {
-      audio.ensure();
-      combat.tryShoot({ x: player.x, z: player.z }, player.angle, (ev, w) => {
-        if (ev === "shot") audio.shot(w.id);
-        if (ev === "down") { player.money += 40; hud.setNotice("Musuh tumbang +Rp40"); police.addHeat(6); }
-        if (ev === "hit") police.addHeat(2);
-      });
-    }
-    if (missions.notice) { hud.setNotice(missions.notice); audio.coin(); missions.notice = ""; }
-    if (input.tapped("KeyM")) {
-      mapOpen = !mapOpen;
-      mapEl.style.display = mapOpen ? "flex" : "none";
-      if (mapOpen) drawBigMap();
-    }
-    if (input.tapped("KeyP", "Escape")) { paused = true; pauseEl.style.display = "flex"; }
-    radio.update(dt);
-    audio.engine(player.mode === "drive" ? player.speed / 46 : 0);
-    sirenT += dt;
-    if (police.wanted > 0 && sirenT > 0.6) { sirenT = 0; audio.siren(t); }
-    if (player.mode === "drive" && !shot) player.camera(camera);
-    hud.update(dt, state, hour);
-  } else {
-    hud.update(0, state, hour);
-  }
-  updateCityLife(city, t);
-  updateSkyLife(skyParts, t);
-  for (const u of police.units) updateLightbar(u.car, t);
-  if (frozenT >= 0 && shot === "chase") { camera.position.set(-15.2, 2.7, 0); camera.lookAt(7, 1.05, 0); }
-  input.endFrame();
-  renderer.render(scene, camera);
-}
-requestAnimationFrame(frame);
+  dt = Math.max(0, Math.min(0.05, dt)); // clamp: tidak negatif, maks 0.05
+  const t = game.shotFixed ? 2.35 : (elapsed += dt);
 
-window.addEventListener("resize", () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-});
-window.__telukReady = true;
+  if (game.state === "play" && !game.shotFixed) {
+    game.clockMin += dt * 2;
+    if (game.clockMin > 19 * 60) { game.clockMin = 6 * 60 + 30; game.day++; }
+    if (input.justPressed("Escape", "KeyP")) setState("pause");
+    else if (input.justPressed("KeyM")) setState("map");
+    else if (input.justPressed("KeyE")) interact();
+    else if (input.justPressed("KeyF") && player.driving) player.exitCar();
+    else if (input.justPressed("KeyR")) { const ri = radio.next(); hud.notify(`Radio: ${ri.station} — "${ri.track}"`); }
+    else if (input.justPressed("KeyH")) audio.horn();
+    combat.switchWeapon(input);
+    player.camYaw -= (input.mouseDown && input.down("KeyQ") ? 1 : 0); // cadangan putar kamera
+    player.update(dt, input, city);
+    player.updateCamera(camera, dt, police.wanted >= 3);
+    traffic.update(dt, t);
+    pedestrians.update(dt, t);
+    shops.update(player.pos);
+    const target = player.driving ? player.pos : player.pos;
+    police.update(dt, t, target, player.speed);
+    if (police.wanted >= 2) police.cool(dt * 0.4);
+    helicopter.active = police.wanted >= 3;
+    helicopter.update(dt, t, target, police.wanted >= 4);
+    combat.tryFire(dt, input, player.pos, player.yaw, camera);
+    combat.update(dt, player.pos, camera, (dmg) => {
+      if (player.armor > 0) { player.armor = Math.max(0, player.armor - dmg); } else player.hp -= dmg;
+    });
+    const ev = missions.update(dt, t, player.pos, player);
+    if (ev?.objective) hud.notify("Objektif: " + ev.objective);
+    if (ev?.completed) {
+      audio.coin();
+      hud.notify(`Misi selesai: ${ev.completed.mission.title} +$${ev.completed.reward} · Rep +${ev.completed.rep}`, 5000);
+      if (missions.current) { const s = missions.start(); if (s) hud.dialog(s.dialog[0], s.dialog[1]); }
+    }
+    if (player.hp <= 0) {
+      player.hp = 100; player.money = Math.max(0, player.money - 100);
+      police.heat = 0; police.wanted = 0;
+      if (player.driving) player.exitCar();
+      player.pos.set(30, 0, -60);
+      hud.notify("Raka pingsan dan terbangun di klinik. -$100");
+    }
+    audio.setEngine(Math.abs(player.speed) / 60, !!player.driving);
+    audio.setSiren(police.wanted > 0, t);
+    radio.update(dt);
+    hud.update(dt, game);
+  } else if (game.shotFixed) {
+    if (shot === "map") hud.drawFullMap(game);
+    else if (shot !== "title") hud.update(0, game);
+  } else if (game.state === "map") {
+    if (input.justPressed("KeyM", "Escape")) setState("play");
+    hud.drawFullMap(game);
+  } else if (game.state === "pause") {
+    if (input.justPressed("Escape", "KeyP")) setState("play");
+  } else if (game.state === "title") {
+    if (input.justPressed("Enter")) startPlay();
+    // kamera judul perlahan mengorbit pemandangan kota
+    if (!game.shotFixed) {
+      camera.position.set(Math.sin(t * 0.05) * 30, 9, 60 + Math.cos(t * 0.05) * 8);
+      camera.lookAt(0, 2, 10);
+      traffic.update(dt, t);
+      pedestrians.update(dt, t);
+    }
+  }
+  city.update(t);
+  render.update(t);
+  render.render();
+  input.endFrame();
+  window.__shotReady = true;
+}
+requestAnimationFrame(loop);
+addEventListener("resize", () => render.resize());
+addEventListener("pointerdown", () => audio.ensure(), { once: true });

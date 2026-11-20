@@ -1,83 +1,156 @@
-// hud.js — HUD padat ala game sungguhan: uang, HP, armor, senjata dan
-// amunisi, bintang wanted, jam dan hari, misi aktif + objektif, dispatch
-// polisi, radio, notifikasi, dialog, kecepatan dan NOS, minimap canvas.
-import { DISTRICTS, SHOPS } from "./config.js";
+// hud.js — HUD padat ala game sungguhan: uang, HP, armor, senjata & amunisi,
+// bintang wanted, jam & hari, misi & objektif, dispatch polisi, radio,
+// notifikasi, kecepatan & NOS, dialog, minimap canvas, peta kota penuh.
+import { DISTRICTS } from "./config.js";
+import { SHOP_POINTS } from "./shops.js";
+
+const $ = (id) => document.getElementById(id);
 
 export class Hud {
   constructor() {
-    this.el = {};
-    for (const id of ["money", "rep", "hpbar", "armorbar", "hptext", "stars", "clock", "weapon",
-      "mission", "objective", "dispatch", "radio", "notice", "dialog", "speed", "nosbar",
-      "district", "prompt", "wanted-label"]) {
-      this.el[id] = document.getElementById("hud-" + id);
-    }
-    this.minimap = document.getElementById("minimap");
-    this.mm = this.minimap ? this.minimap.getContext("2d") : null;
-    this.noticeT = 0;
+    this.el = {
+      money: $("hud-money"), rep: $("hud-rep"), hp: $("bar-hp"), armor: $("bar-armor"),
+      weapon: $("hud-weapon"), ammo: $("hud-ammo"), stars: $("hud-stars"),
+      clock: $("hud-clock"), missionTitle: $("hud-mission"), objective: $("hud-objective"),
+      dispatch: $("hud-dispatch"), radio: $("hud-radio"), speed: $("hud-speed"),
+      nos: $("bar-nos"), dialog: $("dialog-box"), dialogWho: $("dialog-who"), dialogText: $("dialog-text"),
+      notify: $("notify-box"), minimap: $("minimap"), prompt: $("hud-prompt"),
+      wantedWrap: $("hud-wanted"),
+    };
+    this.mapCanvas = $("map-canvas");
+    this.notifyTimer = 0;
+    this.dialogTimer = 0;
   }
-  setNotice(text) {
-    if (this.el.notice) this.el.notice.textContent = text;
-    this.noticeT = 4;
+  notify(text, ms = 3400) {
+    this.el.notify.textContent = text;
+    this.el.notify.style.opacity = "1";
+    this.notifyTimer = ms / 1000;
   }
-  update(dt, state, hour) {
-    const p = state.player, c = state.combat, pol = state.police, m = state.missions;
-    this.noticeT = Math.max(0, this.noticeT - dt);
-    if (this.el.notice) this.el.notice.style.opacity = this.noticeT > 0 ? "1" : "0";
-    if (this.el.money) this.el.money.textContent = "Rp " + p.money.toLocaleString("id-ID");
-    if (this.el.rep) this.el.rep.textContent = "REP " + p.rep;
-    if (this.el.hpbar) this.el.hpbar.style.width = Math.max(0, p.hp) + "%";
-    if (this.el.armorbar) this.el.armorbar.style.width = Math.max(0, p.armor) + "%";
-    if (this.el.hptext) this.el.hptext.textContent = "HP " + Math.ceil(p.hp) + " • ARMOR " + Math.ceil(p.armor);
-    if (this.el.stars) {
-      this.el.stars.textContent = "★★★★★".slice(0, pol.wanted) + "☆☆☆☆☆".slice(0, 5 - pol.wanted);
-      this.el.stars.style.color = pol.wanted > 0 ? "#ffd23e" : "#94a3b8";
-    }
-    if (this.el["wanted-label"]) this.el["wanted-label"].textContent = pol.wanted > 0 ? "WANTED LEVEL " + pol.wanted : "AMAN";
-    const hh = Math.floor(hour), mm2 = Math.floor((hour - hh) * 60);
-    if (this.el.clock) this.el.clock.textContent = "Hari 3 • " + String(hh).padStart(2, "0") + ":" + String(mm2).padStart(2, "0");
-    const ammo = c.weapon.ammo < 0 ? "∞" : String(c.ammo[c.weapon.id]);
-    if (this.el.weapon) this.el.weapon.textContent = c.weapon.name.toUpperCase() + "  " + ammo;
-    if (this.el.mission) this.el.mission.textContent = m.finished ? "SEMUA MISI SELESAI" : "MISI " + (m.idx + 1) + "/10: " + m.current.title;
-    if (this.el.objective) this.el.objective.textContent = m.finished ? "Jelajahi Teluk Cerah dengan bebas." : "▸ " + m.current.goal;
-    if (this.el.dispatch) this.el.dispatch.innerHTML = pol.dispatchLog.map((d) => "<div>📻 " + d + "</div>").join("");
-    if (this.el.radio) this.el.radio.textContent = "♪ " + state.radio.station.name + " — " + state.radio.track;
-    if (this.el.dialog) this.el.dialog.innerHTML = m.dialog ? "<b>" + m.giver + ":</b> " + m.dialog : "";
-    if (this.el.speed) this.el.speed.textContent = p.mode === "drive" ? Math.abs(Math.round(p.speed * 3.6)) + " km/h" : (p.speed ? "JALAN " + p.speed.toFixed(0) : "DIAM");
-    if (this.el.nosbar) this.el.nosbar.style.width = p.nos + "%";
-    let dist = "Taman Cerah";
-    let bd = 1e9;
-    for (const d of DISTRICTS) { const dd = Math.hypot(p.x - d.x, p.z - d.z); if (dd < bd) { bd = dd; dist = d.name; } }
-    if (this.el.district) this.el.district.textContent = dist.toUpperCase();
-    const near = state.shops.nearest();
-    if (this.el.prompt) this.el.prompt.textContent = near ? "[E] " + near.name : (p.mode === "drive" ? "[E] Keluar mobil • [M] Peta • [R] Radio" : "[E] Masuk mobil • [M] Peta");
-    this.drawMinimap(state);
+  dialog(who, text, ms = 5200) {
+    this.el.dialogWho.textContent = who;
+    this.el.dialogText.textContent = text;
+    this.el.dialog.style.opacity = "1";
+    this.dialogTimer = ms / 1000;
   }
-  drawMinimap(state) {
-    if (!this.mm) return;
-    const g = this.mm, S = 176, C = S / 2, scale = S / 280;
-    g.fillStyle = "#7ec850"; g.fillRect(0, 0, S, S);
-    g.fillStyle = "#1e9bb8"; g.fillRect(0, C + 118 * scale, S, S);
-    g.fillStyle = "#f2ddae"; g.fillRect(0, C + 104 * scale, S, 14 * scale + 4);
-    g.strokeStyle = "#2c2f36"; g.lineWidth = 7;
-    for (let i = -3; i <= 3; i++) {
-      g.beginPath(); g.moveTo(0, C + i * 34 * scale); g.lineTo(S, C + i * 34 * scale); g.stroke();
-      g.beginPath(); g.moveTo(C + i * 34 * scale, 0); g.lineTo(C + i * 34 * scale, S); g.stroke();
-    }
-    g.strokeStyle = "#ffd23e"; g.lineWidth = 1;
-    g.beginPath(); g.moveTo(0, C); g.lineTo(S, C); g.stroke();
-    const dot = (x, z, color, r) => { g.fillStyle = color; g.beginPath(); g.arc(C + x * scale, C + z * scale, r, 0, 7); g.fill(); };
-    for (const s of SHOPS) dot(s.x, s.z, s.color, 3.4);
-    const tgt = state.missions.target();
-    if (!state.missions.finished) dot(tgt.x, tgt.z, "#ffd23e", 4.6);
-    for (const u of state.police.units) dot(u.car.position.x, u.car.position.z, "#3b82f6", 3.6);
-    for (const e of state.combat.enemies) if (e.alive) dot(e.mesh.position.x, e.mesh.position.z, "#ef4444", 3);
-    const p = state.player;
+  update(dt, game) {
+    const p = game.player;
+    this.el.money.textContent = "$" + p.money.toLocaleString("en-US");
+    this.el.rep.textContent = "REP " + p.rep;
+    this.el.hp.style.width = Math.max(0, p.hp) + "%";
+    this.el.hp.style.background = p.hp > 35 ? "linear-gradient(90deg,#37d353,#7ee08a)" : "linear-gradient(90deg,#d21f2e,#ff5964)";
+    this.el.armor.style.width = Math.max(0, p.armor) + "%";
+    const w = game.combat.weapon;
+    this.el.weapon.textContent = w.name;
+    this.el.ammo.textContent = w.id === "fist" ? "—" : String(game.combat.ammo[w.id]);
+    this.el.stars.textContent = "★★★★★".slice(0, game.police.wanted) + "☆☆☆☆☆".slice(0, 5 - game.police.wanted);
+    this.el.stars.style.color = game.police.wanted > 0 ? "#ffd94d" : "#5a6672";
+    const mins = Math.floor(game.clockMin) % (24 * 60);
+    const hh = String(Math.floor(mins / 60)).padStart(2, "0"), mm = String(mins % 60).padStart(2, "0");
+    this.el.clock.textContent = `Hari ${game.day} · ${hh}:${mm}`;
+    const m = game.missions.current;
+    this.el.missionTitle.textContent = m ? `Misi ${game.missions.done + 1}/10: ${m.title}` : "Cerita selesai";
+    this.el.objective.textContent = "▸ " + game.missions.objectiveText();
+    this.el.dispatch.innerHTML = game.police.dispatchLog.map((d) => `<div>📻 ${d}</div>`).join("");
+    const ri = game.radio.info;
+    this.el.radio.textContent = `♪ ${ri.station} — "${ri.track}"`;
+    if (p.driving) {
+      this.el.speed.style.opacity = "1";
+      this.el.speed.querySelector("b").textContent = String(Math.round(p.speed * 3.6));
+      this.el.nos.style.width = (game.shops.owned.has("nos") ? 78 : 0) + "%";
+    } else this.el.speed.style.opacity = "0";
+    const near = game.shops.near;
+    this.el.prompt.textContent = near ? `Tekan E — ${near.name}` : (p.driving ? "F: keluar mobil · H: klakson" : "E: masuk mobil dekat · M: peta");
+    this.el.prompt.style.opacity = this.el.prompt.textContent ? "1" : "0";
+    if (this.notifyTimer > 0) { this.notifyTimer -= dt; if (this.notifyTimer <= 0) this.el.notify.style.opacity = "0"; }
+    if (this.dialogTimer > 0) { this.dialogTimer -= dt; if (this.dialogTimer <= 0) this.el.dialog.style.opacity = "0"; }
+    this.drawMinimap(game);
+  }
+  drawMinimap(game) {
+    const c = this.el.minimap, g = c.getContext("2d");
+    const S = c.width, half = 230;
+    g.fillStyle = "#20303c"; g.fillRect(0, 0, S, S);
     g.save();
-    g.translate(C + p.x * scale, C + p.z * scale);
-    g.rotate(-p.angle + Math.PI / 2);
-    g.fillStyle = "#ffffff";
-    g.beginPath(); g.moveTo(0, -6); g.lineTo(4.4, 5); g.lineTo(0, 2.4); g.lineTo(-4.4, 5); g.closePath(); g.fill();
+    g.translate(S / 2, S / 2);
+    g.scale(S / 190, S / 190);
+    g.rotate(0);
+    const px = game.player.pos.x, pz = game.player.pos.z;
+    g.translate(-px, -pz);
+    g.fillStyle = "#2c3540";
+    for (let i = -half; i <= half; i += 46) { g.fillRect(i - 6, -half, 13, half * 2); g.fillRect(-half, i - 6, half * 2, 13); }
+    g.fillStyle = "#1177aa"; g.fillRect(-half, 150, half * 2, 90);
+    g.fillStyle = "#e8c98a"; g.fillRect(-half, 148, half * 2, 10);
+    for (const s of SHOP_POINTS) { g.fillStyle = s.color; g.fillRect(s.x - 3, s.z - 3, 6, 6); }
+    if (game.missions.active) {
+      const t = game.missions.targetPos();
+      g.fillStyle = "#ffd94d"; g.beginPath(); g.arc(t.x, t.z, 5, 0, 7); g.fill();
+    }
+    for (const u of game.police.units) {
+      if (!u.mesh.visible) continue;
+      g.fillStyle = Math.sin(performance.now() / 180) > 0 ? "#ff2233" : "#2255ff";
+      g.beginPath(); g.arc(u.mesh.position.x, u.mesh.position.z, 3.4, 0, 7); g.fill();
+    }
     g.restore();
-    g.strokeStyle = "rgba(255,255,255,0.7)"; g.lineWidth = 2; g.strokeRect(1, 1, S - 2, S - 2);
+    // panah pemain di tengah
+    g.save();
+    g.translate(S / 2, S / 2);
+    g.rotate(game.player.yaw + Math.PI);
+    g.fillStyle = "#ffffff";
+    g.beginPath(); g.moveTo(0, -8); g.lineTo(5.5, 6); g.lineTo(0, 3); g.lineTo(-5.5, 6); g.closePath(); g.fill();
+    g.restore();
+    g.strokeStyle = "rgba(255,255,255,0.5)"; g.lineWidth = 2; g.strokeRect(1, 1, S - 2, S - 2);
+  }
+  drawFullMap(game) {
+    const c = this.mapCanvas, g = c.getContext("2d");
+    const W = c.width, H = c.height;
+    const grad = g.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, "#17384a"); grad.addColorStop(1, "#0e2432");
+    g.fillStyle = grad; g.fillRect(0, 0, W, H);
+    const toX = (x) => (x + 240) / 480 * W, toY = (z) => (z + 240) / 480 * H;
+    g.fillStyle = "#1177aa"; g.fillRect(0, toY(150), W, H - toY(150));
+    g.fillStyle = "#e8c98a"; g.fillRect(0, toY(148), W, toY(160) - toY(148));
+    g.strokeStyle = "#48586a"; g.lineWidth = 7;
+    for (let i = -230; i <= 230; i += 46) {
+      g.beginPath(); g.moveTo(toX(i), 0); g.lineTo(toX(i), toY(150)); g.stroke();
+      g.beginPath(); g.moveTo(0, toY(i)); g.lineTo(W, toY(i)); g.stroke();
+    }
+    g.strokeStyle = "#ffd94d"; g.lineWidth = 2; g.setLineDash([8, 7]);
+    g.beginPath(); g.moveTo(toX(0), 0); g.lineTo(toX(0), toY(150)); g.stroke();
+    g.beginPath(); g.moveTo(0, toY(0)); g.lineTo(W, toY(0)); g.stroke();
+    g.setLineDash([]);
+    for (const d of DISTRICTS) {
+      g.fillStyle = d.color;
+      g.beginPath(); g.arc(toX(d.x), toY(d.z), 7, 0, 7); g.fill();
+      g.font = "bold 17px sans-serif"; g.textAlign = "center";
+      g.fillStyle = "#ffffff"; g.shadowColor = "#000"; g.shadowBlur = 5;
+      g.fillText(d.name, toX(d.x), toY(d.z) - 13);
+      g.shadowBlur = 0;
+    }
+    for (const s of SHOP_POINTS) {
+      g.fillStyle = s.color; g.fillRect(toX(s.x) - 5, toY(s.z) - 5, 10, 10);
+      g.fillStyle = "#fff"; g.font = "12px sans-serif"; g.textAlign = "center";
+      g.fillText(s.name, toX(s.x), toY(s.z) + 22);
+    }
+    if (game.missions.active) {
+      const t = game.missions.targetPos();
+      g.fillStyle = "#ffd94d"; g.font = "26px sans-serif";
+      g.fillText("★", toX(t.x), toY(t.z) + 8);
+    }
+    const p = game.player.pos;
+    g.save();
+    g.translate(toX(p.x), toY(p.z)); g.rotate(game.player.yaw + Math.PI);
+    g.fillStyle = "#ffffff"; g.beginPath(); g.moveTo(0, -11); g.lineTo(7, 8); g.lineTo(0, 4); g.lineTo(-7, 8); g.closePath(); g.fill();
+    g.restore();
+    // legenda
+    g.fillStyle = "rgba(8,14,20,0.82)"; g.fillRect(16, H - 128, 252, 112);
+    g.strokeStyle = "rgba(255,255,255,0.4)"; g.strokeRect(16, H - 128, 252, 112);
+    g.fillStyle = "#fff"; g.font = "bold 14px sans-serif"; g.textAlign = "left";
+    g.fillText("LEGENDA", 28, H - 104);
+    g.font = "13px sans-serif";
+    g.fillText("▲  Raka (kamu)", 28, H - 82);
+    g.fillText("★  Objektif misi", 28, H - 62);
+    g.fillText("■  Toko / garasi / warung", 28, H - 42);
+    g.fillText("●  Distrik kota", 28, H - 22);
+    g.font = "bold 22px sans-serif"; g.textAlign = "center";
+    g.fillText("PETA KOTA TELUK CERAH", W / 2, 34);
   }
 }

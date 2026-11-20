@@ -1,41 +1,47 @@
 // radio.js — 3 stasiun radio prosedural: loop synth orisinal WebAudio,
-// nama stasiun dan judul lagu tampil di HUD, ganti stasiun dengan R.
+// nama stasiun dan judul lagu tampil di HUD.
 import { RADIO_STATIONS } from "./config.js";
 
 const SCALES = [
-  [220, 261.6, 329.6, 392, 329.6, 261.6],
-  [196, 246.9, 293.7, 392, 293.7, 246.9],
-  [174.6, 220, 261.6, 349.2, 261.6, 220],
+  [220, 261.6, 329.6, 392, 440, 523.3],
+  [196, 246.9, 293.7, 349.2, 392, 493.9],
+  [174.6, 220, 261.6, 311.1, 349.2, 440],
+];
+const PATTERNS = [
+  [0, 2, 4, 3, 5, 4, 2, 1],
+  [0, 0, 3, 2, 4, 4, 1, 2],
+  [5, 4, 2, 3, 1, 2, 0, 2],
 ];
 
 export class Radio {
   constructor(audio) {
-    this.stations = RADIO_STATIONS;
-    this.idx = 0;
-    this.trackIdx = 0;
     this.audio = audio;
+    this.station = 0;
+    this.track = 0;
     this.step = 0;
     this.timer = 0;
     this.playing = false;
   }
-  get station() { return this.stations[this.idx]; }
-  get track() { return this.station.tracks[this.trackIdx % this.station.tracks.length]; }
-  next() {
-    this.idx = (this.idx + 1) % this.stations.length;
-    this.trackIdx = 0; this.step = 0;
+  get info() {
+    const s = RADIO_STATIONS[this.station];
+    return { station: s.name, genre: s.genre, track: s.tracks[this.track % s.tracks.length] };
   }
-  start() { this.playing = true; }
+  next() {
+    this.station = (this.station + 1) % RADIO_STATIONS.length;
+    this.track++;
+    return this.info;
+  }
   update(dt) {
-    if (!this.playing || !this.audio.ctx) return;
+    if (!this.audio.ctx || !this.playing) return;
     this.timer -= dt;
-    if (this.timer <= 0) {
-      this.timer = 0.24;
-      const scale = SCALES[this.idx];
-      const note = scale[this.step % scale.length];
-      this.audio.tone(note, 0.2, "triangle", 0.05);
-      if (this.step % 4 === 0) this.audio.tone(note / 2, 0.4, "sine", 0.07);
-      this.step += 1;
-      if (this.step % 24 === 0) this.trackIdx += 1;
-    }
+    if (this.timer > 0) return;
+    this.timer = 0.24;
+    const scale = SCALES[this.station];
+    const pat = PATTERNS[this.station];
+    const note = scale[pat[this.step % pat.length] % scale.length];
+    this.audio.blip(note, 0.22, this.station === 1 ? "square" : "triangle", 0.045);
+    if (this.step % 4 === 0) this.audio.blip(note / 2, 0.4, "sine", 0.06);
+    this.step++;
+    if (this.step % 32 === 0) this.track++;
   }
 }
