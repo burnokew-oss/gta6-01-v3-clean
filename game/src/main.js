@@ -1,270 +1,192 @@
-import * as THREE from 'three';
-import { CONFIG } from './config.js';
-import { makeRng } from './random.js';
-import { buildCity } from './city.js';
-import { createWorld, drawWorld, resizeWorld } from './render.js';
-import { createInput } from './input.js';
-import { createPlayer, updatePlayer, damagePlayer, bustPlayer, wastePlayer } from './player.js';
-import { createTraffic, updateTraffic } from './vehicles.js';
-import { createPedestrians, updatePedestrians } from './pedestrians.js';
-import { createPolice, updatePolice } from './police.js';
-import { createHelicopter, updateHelicopter } from './helicopter.js';
-import { createCombat, updateCombat, switchWeapon } from './combat.js';
-import { createMissions, updateMissions } from './missions.js';
-import { createShops, updateShops } from './shops.js';
-import { createRadio, updateRadio, nextStation } from './radio.js';
-import { createAudio, playSound, setMuted } from './audio.js';
-import { loadGame } from './save.js';
-import { createHud, updateHud, showDialog, showBanner, showMap, hideTitle } from './hud.js';
-import { applyShotFromAddress } from './shots.js';
-
-function pickNumber(candidates, fallback) {
-  for (const value of candidates) {
-    if (typeof value === 'number' && Number.isFinite(value)) return value;
-  }
-  return fallback;
-}
-
-function readSeed() {
-  try {
-    const params = new URLSearchParams(window.location.search);
-    const raw = params.get('seed');
-    const parsed = raw === null ? NaN : Number(raw);
-    return Number.isFinite(parsed) ? parsed : 1;
-  } catch (err) {
-    return 1;
-  }
-}
-
-function updateCamera(state, dt) {
-  const world = state.world;
-  const player = state.player;
-  if (!world || !world.camera || !player) return;
-  const camera = world.camera;
-  if (state.cameraMode === 'shot' || state.shotCamera) return;
-  if (state.titleOpen) {
-    const angle = (state.time || 0) * 0.05;
-    const orbit = Math.min(1, dt * 1.2);
-    camera.position.x += (Math.cos(angle) * 55 - camera.position.x) * orbit;
-    camera.position.y += (24 - camera.position.y) * orbit;
-    camera.position.z += (Math.sin(angle) * 55 - camera.position.z) * orbit;
-    camera.lookAt(0, 4, 0);
-    return;
-  }
-  const inCar = Boolean(player.car);
-  const heading = inCar ? player.car.heading : (state.cameraYaw || 0);
-  const backX = Math.sin(heading);
-  const backZ = Math.cos(heading);
-  const dist = inCar ? 13.5 : 10.5;
-  const height = inCar ? 5.6 : 6.4;
-  const target = player.position;
-  const wantX = target.x + backX * dist;
-  const wantY = height;
-  const wantZ = target.z + backZ * dist;
-  const smooth = Math.min(1, dt * (inCar ? 5 : 7));
-  camera.position.x += (wantX - camera.position.x) * smooth;
-  camera.position.y += (wantY - camera.position.y) * smooth;
-  camera.position.z += (wantZ - camera.position.z) * smooth;
-  const lookX = target.x - backX * 3.5;
-  const lookY = 1.6;
-  const lookZ = target.z - backZ * 3.5;
-  const shake = state.combat?.shake || 0;
-  const shakeX = (state.combat?.shakeX || 0) * shake;
-  const shakeY = (state.combat?.shakeY || 0) * shake;
-  camera.lookAt(lookX + shakeX, lookY + shakeY, lookZ);
-}
+// Boot Teluk Cerah: rakit semua sistem, jalankan loop frame.
+import "three";
+const THREE = window.THREE;
+import { CONFIG } from "./config.js";
+import { makeRng } from "./random.js";
+import { createWorld, drawWorld, resizeWorld } from "./render.js";
+import { createInput } from "./input.js";
+import { buildCity } from "./city.js";
+import { createPlayer, updatePlayer } from "./player.js";
+import { createTraffic, updateTraffic, nearestCar, driveCar } from "./vehicles.js";
+import { createPedestrians, updatePedestrians } from "./pedestrians.js";
+import { createPolice, updatePolice, setWanted, addHeat } from "./police.js";
+import { createHelicopter, updateHelicopter } from "./helicopter.js";
+import { createCombat, updateCombat, switchWeapon } from "./combat.js";
+import { createMissions, updateMissions, startMission } from "./missions.js";
+import { createShops, updateShops } from "./shops.js";
+import { createRadio, updateRadio, nextStation } from "./radio.js";
+import { createAudio, setMuted, updateAudio } from "./audio.js";
+import { saveGame, loadGame } from "./save.js";
+import { createHud, updateHud, showMap, showDialog, showBanner } from "./hud.js";
+import { applyShotFromAddress } from "./shots.js";
 
 export function boot() {
   const world = createWorld();
   const input = createInput(document);
-  const rng = makeRng(readSeed());
-  const city = buildCity(world.scene, rng);
-
+  const rng = makeRng(1);
   const state = {
-    world,
-    scene: world.scene,
-    camera: world.camera,
-    renderer: world.renderer,
-    input,
-    rng,
-    city,
-    config: CONFIG,
-    worldSize: pickNumber([CONFIG?.worldSize, CONFIG?.world?.size, city?.size], 320),
-    player: null,
-    cars: [],
-    peds: [],
-    police: null,
-    helicopter: null,
-    combat: null,
-    missions: null,
-    shops: null,
-    radio: null,
-    audio: null,
-    hud: null,
-    clock: { hour: 20, minute: 0, day: 1 },
-    cash: 500,
-    reputation: { points: 0, tier: 1, level: 1 },
-    wanted: 0,
-    shells: 0,
-    muted: false,
-    paused: false,
-    mapOpen: false,
-    titleOpen: true,
-    titleContinue: null,
-    dialogOpen: false,
-    phase: 'title',
-    cameraYaw: Math.PI,
-    cameraMode: 'follow',
-    shotCamera: false,
-    time: 0,
-    playTime: 0,
-    effects: [],
-    shellSpots: [],
-    stats: { carsStolen: 0, takedowns: 0, escapes: 0, wasted: 0, busted: 0 },
-    ui: {},
-    audioApi: {},
-    playerApi: {},
-    policeApi: {},
-    combatApi: {},
-    radioApi: {},
-    pedsApi: {},
+    world, input, rng,
+    cash: CONFIG.startCash, rep: 0, wanted: 0, heat: 0, heatTimer: 0,
+    day: 1, clockMin: 18 * 60 + 30, shells: 0, shellGot: new Array(CONFIG.shellTotal).fill(false),
+    missionsDone: 0, takedowns: 0, carsStolen: 0, escapes: 0, playSeconds: 0,
+    muted: false, paused: false, staged: null, camLocked: false, camYaw: Math.PI,
+    dialog: null, banner: null, bannerAt: 0, damageFlashAt: 0, audioReady: false,
+    shotAnchor: null, shotSpeed: 172, shotKills: null, extraLightbars: null, bustedTimer: 0,
   };
+  state.city = buildCity(world.scene, rng);
+  state.player = createPlayer(state);
+  state.cars = createTraffic(state, 16);
+  state.peds = createPedestrians(state, 40);
+  state.policeUnits = createPolice(state);
+  state.heli = createHelicopter(state);
+  state.combat = createCombat(state);
+  state.missionState = createMissions(state);
+  state.shopState = createShops(state);
+  state.radioState = createRadio(state);
+  state.audioState = createAudio(state);
+  state.hudState = createHud(state);
+  switchWeapon(state, 1);
+  state.combat.playerGun.visible = false;
 
-  state.ui = {
-    banner: (text) => showBanner(state, text),
-    dialog: (name, text) => showDialog(state, name, text),
-    map: (open) => showMap(state, open),
-  };
-  state.audioApi = {
-    play: (name) => playSound(state, name),
-    setMuted: (muted) => setMuted(state, muted),
-  };
-  state.playerApi = { damagePlayer, bustPlayer, wastePlayer };
-  state.radioApi = { nextStation: (st) => nextStation(st) };
-
-  createAudio(state);
-  createPlayer(state);
-  createTraffic(state, pickNumber([CONFIG?.traffic?.count, CONFIG?.trafficCount], 16));
-  createPedestrians(state, pickNumber([CONFIG?.pedestrians?.count, CONFIG?.pedCount], 40));
-  createPolice(state);
-  createHelicopter(state);
-  createCombat(state);
-  createMissions(state);
-  createShops(state);
-  createRadio(state);
-  createHud(state);
-
-  state.cameraYaw = (state.player?.heading || 0) + Math.PI;
-
-  applyShotFromAddress(state);
-
-  try {
-    window.__tc = state;
-  } catch (err) {
-    /* debug handle unavailable */
+  window.__telukState = state;
+  const shotName = applyShotFromAddress(state);
+  if (!shotName) {
+    document.getElementById("enter-hint").style.display = "block";
   }
 
-  window.addEventListener('resize', () => resizeWorld(world));
-  window.addEventListener('blur', () => {
-    if (!state.titleOpen && !state.mapOpen) state.paused = true;
-  });
-  document.addEventListener('visibilitychange', () => {
-    if (document.hidden && !state.titleOpen && !state.mapOpen) state.paused = true;
-  });
+  const unlock = () => { state.audioReady = true; };
+  window.addEventListener("pointerdown", unlock, { once: true });
+  window.addEventListener("keydown", unlock, { once: true });
+  window.addEventListener("resize", () => resizeWorld(world));
 
+  const titleEl = document.getElementById("title-overlay");
   let last = performance.now();
-  function frame(now) {
+  let wasWanted = 0;
+
+  function enterNearestCar(steal) {
+    const car = nearestCar(state, state.player.pos, steal ? 4.4 : 3.6);
+    if (!car) return;
+    if (steal && car.driver) { state.carsStolen += 1; addHeat(state, 35); }
+    if (car.type === "polisi") addHeat(state, 30);
+    state.player.car = car;
+    car.parked = false; car.lane = null;
+    state.player.mesh.visible = false;
+    showBanner(state, steal ? "Mobil dicuri!" : `Naik ${car.spec.label}`);
+  }
+  function exitCar() {
+    const car = state.player.car;
+    state.player.car = null;
+    state.player.mesh.visible = true;
+    state.player.pos.set(car.pos.x + 2.2, 0, car.pos.z);
+    state.player.mesh.position.copy(state.player.pos);
+    if (Math.abs(car.speed) < 1) car.parked = true;
+  }
+
+  function frame() {
     requestAnimationFrame(frame);
-    const rawDt = (now - last) / 1000;
-    last = now;
-    const dt = Math.max(0.001, Math.min(0.05, rawDt));
-    if (!state.paused) {
-      state.time += dt;
-      state.playTime += dt;
-      state.clock.minute += dt * (2 / 3);
-      if (state.clock.minute >= 60) {
-        state.clock.minute -= 60;
-        state.clock.hour += 1;
-      }
-      if (state.clock.hour >= 24) {
-        state.clock.hour -= 24;
-        state.clock.day += 1;
+    const nowMs = performance.now();
+    const dt = Math.max(0, Math.min(0.05, (nowMs - last) / 1000 || 0.016));
+    last = nowMs;
+    const now = nowMs;
+    if (state.paused) { drawWorld(world, state); return; }
+    state.playSeconds += dt;
+    if (!state.staged) state.clockMin += dt * 0.6;
+    if (state.clockMin >= 1440) { state.clockMin -= 1440; state.day += 1; }
+    if (wasWanted > 0 && state.wanted === 0) state.escapes += 1;
+    wasWanted = state.wanted;
+
+    // Masukan global.
+    if (input.takePressed("Escape")) {
+      if (state.hudState.mapOpen) showMap(state, false);
+      else if (!state.staged) {
+        state.paused = true;
+        document.getElementById("pause-overlay").style.display = "flex";
       }
     }
-    state.phase = state.titleOpen
-      ? 'title'
-      : state.mapOpen
-        ? 'map'
-        : state.paused
-          ? 'paused'
-          : 'playing';
-
-    if (state.titleOpen) {
-      if (input.takePressed('Enter')) {
-        state.titleOpen = false;
-        hideTitle(state);
-        if (state.ui && typeof state.ui.banner === 'function') {
-          state.ui.banner('Selamat datang di Teluk Cerah, Raka.');
-        }
-      } else if (input.takePressed('KeyL')) {
-        state.titleOpen = false;
-        hideTitle(state);
-        loadGame(state, 1);
+    if (input.takePressed("KeyM") && !state.staged) showMap(state, !state.hudState.mapOpen);
+    if (input.takePressed("KeyN")) setMuted(state, !state.muted);
+    if (state.paused) {
+      if (input.takePressed("KeyQ")) {
+        state.paused = false;
+        document.getElementById("pause-overlay").style.display = "none";
       }
-    } else {
-      if (input.takePressed('Escape')) {
-        if (state.mapOpen) {
-          state.mapOpen = false;
-          showMap(state, false);
-        } else if (state.dialogOpen) {
-          state.dialogOpen = false;
-        } else {
-          state.paused = !state.paused;
-        }
-      }
-      if (input.takePressed('KeyM')) {
-        state.mapOpen = !state.mapOpen;
-        showMap(state, state.mapOpen);
-      }
-      if (input.takePressed('KeyN')) {
-        state.muted = !state.muted;
-        setMuted(state, state.muted);
-      }
-      if (input.takePressed('Digit1')) switchWeapon(state, 0);
-      if (input.takePressed('Digit2')) switchWeapon(state, 1);
-      if (input.takePressed('Digit3')) switchWeapon(state, 2);
+      if (input.takePressed("Digit1")) { saveGame(state, 1); showBanner(state, "Disimpan di slot 1"); }
+      if (input.takePressed("Digit2")) { if (loadGame(state, 1)) showBanner(state, "Save slot 1 dimuat"); }
+      drawWorld(world, state);
+      updateHud(state, dt);
+      return;
+    }
+    if (!state.staged && titleEl.style.display !== "none" && (input.keys["Enter"] || input.takePressed("KeyL"))) {
+      if (input.takePressed("KeyL")) loadGame(state, 1);
+      titleEl.style.display = "none";
+      if (!state.missionState.active && state.missionsDone === 0) startMission(state, 1);
     }
 
-    if (!state.paused && !state.titleOpen) {
-      updatePlayer(state, dt);
-      updateTraffic(state, dt);
-      updatePedestrians(state, dt);
-      updatePolice(state, dt);
-      updateHelicopter(state, dt);
-      updateCombat(state, dt);
-      updateMissions(state, dt);
-      updateShops(state, dt);
-      updateRadio(state, dt);
+    if (!state.staged) {
+      if (state.player.car) {
+        driveCar(state, state.player.car, dt);
+        if (input.takePressed("KeyE") || input.takePressed("KeyF")) exitCar();
+        if (input.takePressed("KeyR")) nextStation(state);
+      } else {
+        updatePlayer(state, dt);
+        if (input.takePressed("KeyE")) {
+          if (state.shopState.near) { /* toko menangani E sendiri */ }
+          else enterNearestCar(false);
+        }
+        if (input.takePressed("KeyF")) enterNearestCar(true);
+      }
     }
+
+    updateTraffic(state, dt);
+    updatePedestrians(state, dt);
+    updatePolice(state, dt);
+    updateHelicopter(state, dt);
+    updateCombat(state, dt);
+    updateMissions(state, dt);
+    updateShops(state, dt);
+    updateRadio(state, dt);
+    updateAudio(state, dt);
+
+    // Kamera.
+    const cam = world.camera;
+    if (!state.camLocked) {
+      if (state.player.car) {
+        const car = state.player.car;
+        const back = 8.6 + Math.abs(car.speed) * 0.05;
+        const tx = car.pos.x - Math.sin(car.heading) * back;
+        const tz = car.pos.z - Math.cos(car.heading) * back;
+        cam.position.x += (tx - cam.position.x) * Math.min(1, dt * 5);
+        cam.position.z += (tz - cam.position.z) * Math.min(1, dt * 5);
+        cam.position.y += (3.1 - cam.position.y) * Math.min(1, dt * 5);
+        cam.lookAt(car.pos.x + Math.sin(car.heading) * 6, 1.2, car.pos.z + Math.cos(car.heading) * 6);
+      } else {
+        const p = state.player;
+        const tx = p.pos.x - Math.sin(p.heading) * 7.6;
+        const tz = p.pos.z - Math.cos(p.heading) * 7.6;
+        cam.position.x += (tx - cam.position.x) * Math.min(1, dt * 6);
+        cam.position.z += (tz - cam.position.z) * Math.min(1, dt * 6);
+        cam.position.y += (3.4 - cam.position.y) * Math.min(1, dt * 6);
+        cam.lookAt(p.pos.x + Math.sin(p.heading) * 5, 1.3, p.pos.z + Math.cos(p.heading) * 5);
+      }
+      if (state.combat.shake > 0) {
+        cam.position.x += (Math.random() - 0.5) * state.combat.shake * 0.3;
+        cam.position.y += (Math.random() - 0.5) * state.combat.shake * 0.3;
+      }
+    }
+    // Kedip lightbar mobil staging.
+    if (state.extraLightbars) {
+      const phase = Math.floor(now / 180) % 2 === 0;
+      for (const lb of state.extraLightbars) {
+        lb.red.material.color.setHex(phase ? 0xff2438 : 0x5c101c);
+        lb.blue.material.color.setHex(phase ? 0x0f2f66 : 0x2a7bff);
+      }
+    }
+    // Kedip neon: denyut halus pada sorot heli.
     updateHud(state, dt);
-    updateCamera(state, dt);
     drawWorld(world, state);
-
-    if (input.mouse) {
-      input.mouse.dx = 0;
-      input.mouse.dy = 0;
-    }
   }
   requestAnimationFrame(frame);
   return state;
 }
 
-try {
-  if (typeof document !== 'undefined' && document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', boot);
-  } else {
-    boot();
-  }
-} catch (err) {
-  /* boot errors surface through the page console */
-}
+boot();
